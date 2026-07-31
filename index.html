@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Life Atlas</title>
+    <meta name="theme-color" content="#4f6f52" />
+    <meta name="description" content="A personal life tracker for areas, habits, calendar plans, tasks, notes, and exams." />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Life areas">
+        <div class="brand">
+          <div class="brand-mark">LA</div>
+          <div>
+            <h1>Life Atlas</h1>
+          </div>
+        </div>
+
+        <button class="primary-button" id="addRootTopic" type="button">
+          <span>+</span>
+          New life area
+        </button>
+
+        <nav class="app-nav" aria-label="Main sections">
+          <button class="app-nav-item active" type="button" data-app-view="life">Life</button>
+          <button class="app-nav-item" type="button" data-app-view="brain">Blabber</button>
+          <button class="app-nav-item" type="button" data-app-view="calendar">Calendar</button>
+          <button class="app-nav-item" type="button" data-app-view="time">Schedule</button>
+          <button class="app-nav-item" type="button" data-app-view="habits">Habits</button>
+          <button class="app-nav-item" type="button" data-app-view="exams">Exams</button>
+        </nav>
+
+        <nav class="topic-tree" id="topicTree" aria-label="Life areas"></nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="title-row">
+            <button class="back-button" id="backButton" type="button" aria-label="Go back">&larr;</button>
+            <div>
+              <p class="eyebrow" id="currentKicker">Current area</p>
+              <div class="breadcrumbs" id="breadcrumbs"></div>
+              <h2 id="currentTitle">Dashboard</h2>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button" id="renameTopic" type="button">
+              Rename
+            </button>
+            <button class="ghost-button danger" id="deleteTopic" type="button">
+              Delete
+            </button>
+            <button class="ghost-button" id="enableNotifications" type="button">
+              Enable alerts
+            </button>
+            <button class="ghost-button" id="showNextExam" type="button" hidden>
+              Show event tile
+            </button>
+            <button class="ghost-button" id="exportCalendar" type="button">
+              Export exams
+            </button>
+          </div>
+        </header>
+
+        <section class="overview-grid" aria-label="Life overview">
+          <article class="metric">
+            <span class="metric-label">Open tasks</span>
+            <strong id="openTaskCount">0</strong>
+          </article>
+          <article class="metric">
+            <span class="metric-label">Areas</span>
+            <strong id="topicCount">0</strong>
+          </article>
+          <article class="metric" id="nextExamMetric">
+            <button class="metric-dismiss" id="hideNextExam" type="button" aria-label="Hide next event">x</button>
+            <span class="metric-label">Next event</span>
+            <strong id="nextExam">None</strong>
+          </article>
+        </section>
+
+        <div class="subject-tabs" id="subjectTabs" hidden>
+          <button class="subject-tab" type="button" data-view="topics">Topics</button>
+          <button class="subject-tab active" type="button" data-view="homework">Homework</button>
+          <button class="subject-tab" type="button" data-view="notes">Notes</button>
+        </div>
+
+        <section class="content-grid" id="contentGrid" data-app-view="life">
+          <section class="panel folder-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Inside this area</p>
+                <h3>Topics</h3>
+              </div>
+              <div class="panel-actions">
+                <button class="icon-button" id="addChildTopic" type="button" aria-label="Add area">+</button>
+              </div>
+            </div>
+            <div class="folder-grid" id="childTopics"></div>
+          </section>
+
+          <section class="panel task-panel priority-panel" draggable="true" data-focus-panel="tasks">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">General to-do list</p>
+                <h3>Tasks</h3>
+              </div>
+            </div>
+            <form class="inline-form" id="taskForm">
+              <input id="taskInput" type="text" placeholder="Small next step" autocomplete="off" />
+              <button type="submit">Add</button>
+            </form>
+            <div class="task-tools">
+              <input id="taskSearch" type="search" placeholder="Find tasks" autocomplete="off" />
+              <div class="segmented" id="taskFilter" aria-label="Task filter">
+                <button type="button" data-filter="all">All</button>
+                <button class="active" type="button" data-filter="open">Open</button>
+                <button type="button" data-filter="done">Done</button>
+              </div>
+            </div>
+            <ul class="task-list" id="taskList"></ul>
+          </section>
+
+          <section class="panel exam-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Life track</p>
+                <h3>Big exams</h3>
+              </div>
+            </div>
+            <details class="creator" id="examCreator">
+              <summary>Add a big exam</summary>
+              <form class="exam-form" id="examForm">
+                <input id="examName" type="text" placeholder="Exam name" autocomplete="off" required />
+                <div class="date-row" aria-label="Exam date">
+                  <select id="examMonth" required aria-label="Month"></select>
+                  <select id="examDay" required aria-label="Day"></select>
+                  <select id="examYear" required aria-label="Year"></select>
+                </div>
+                <select id="examTime" required aria-label="Time"></select>
+                <select id="examReminder">
+                  <option value="1">1 day before</option>
+                  <option value="3">3 days before</option>
+                  <option value="7" selected>1 week before</option>
+                  <option value="14">2 weeks before</option>
+                </select>
+                <button type="submit">Add exam</button>
+              </form>
+            </details>
+            <div class="exam-list" id="examList"></div>
+          </section>
+
+          <section class="panel notes-panel priority-panel" draggable="true" data-focus-panel="notes">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Context</p>
+                <h3>Notes</h3>
+              </div>
+              <div class="panel-actions">
+                <button class="notes-collapse" id="toggleNotes" type="button" aria-label="Minimize notes" title="Minimize notes">
+                  <span aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+            <div class="notes-workspace" id="notesWorkspace">
+              <div id="topicNotes" class="notes-editor" contenteditable="true" data-placeholder="Notes, bullets, nested thoughts" spellcheck="true"></div>
+            </div>
+          </section>
+
+          <section class="panel brain-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Loose drafts</p>
+                <h3>Blabber board</h3>
+              </div>
+            </div>
+            <div class="brain-board">
+              <aside class="brain-files" aria-label="Blabber files">
+                <form class="brain-new-form" id="brainNoteForm">
+                  <input id="brainNoteNewTitle" type="text" placeholder="Half-formed thought" autocomplete="off" />
+                  <button type="submit" aria-label="Add thought">+</button>
+                </form>
+                <div class="brain-file-list" id="brainNoteList"></div>
+              </aside>
+              <section class="brain-editor" aria-label="Blabber editor">
+                <div class="brain-editor-top">
+                  <input id="brainNoteTitle" type="text" placeholder="Untitled scrap" autocomplete="off" />
+                  <select id="brainNoteState" aria-label="Thought state">
+                    <option value="messy">Messy</option>
+                    <option value="maybe">Maybe</option>
+                    <option value="keep">Keep</option>
+                  </select>
+                  <button class="delete-button" id="brainNoteDelete" type="button" aria-label="Delete thought">x</button>
+                </div>
+                <textarea id="brainNoteBody" placeholder="Dump it here. It does not have to be useful yet."></textarea>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel time-tracker-panel">
+            <div class="time-tracker-heading">
+              <div>
+                <p class="eyebrow">Weekly plan</p>
+                <h3>Schedule</h3>
+              </div>
+            </div>
+
+            <div class="ideal-week-controls">
+              <div>
+                <span class="ideal-week-label">Season</span>
+                <div class="segmented compact" id="timeScheduleSeason" aria-label="Academic schedule season">
+                  <button class="active" type="button" data-schedule-season="school">Academic year</button>
+                  <button type="button" data-schedule-season="summer">Summer</button>
+                </div>
+              </div>
+              <div class="ideal-week-days" id="timeScheduleDays" aria-label="Ideal schedule day">
+                <button type="button" data-schedule-day="0">Sun</button>
+                <button type="button" data-schedule-day="1">Mon</button>
+                <button type="button" data-schedule-day="2">Tue</button>
+                <button type="button" data-schedule-day="3">Wed</button>
+                <button type="button" data-schedule-day="4">Thu</button>
+                <button type="button" data-schedule-day="5">Fri</button>
+                <button type="button" data-schedule-day="6">Sat</button>
+              </div>
+            </div>
+
+            <form class="sleep-routine-card" id="sleepRoutineForm">
+              <button class="sleep-trend-open" id="sleepTrendOpen" type="button">Sleep trends</button>
+              <label>Sleep <input id="sleepStart" type="time" step="300" required /></label>
+              <label>Wake <input id="wakeTime" type="time" step="300" required /></label>
+              <button class="primary-button compact" type="submit">Save</button>
+              <button class="ghost-button compact" id="sleepRoutineClear" type="button">Clear</button>
+            </form>
+
+            <form class="time-block-form" id="timeBlockForm">
+              <input id="timeBlockName" type="text" placeholder="What are you doing?" autocomplete="off" required />
+              <select id="timeBlockCategory" aria-label="Time category">
+                <option value="food">Food</option>
+                <option value="focus">Focus</option>
+                <option value="school">Academics</option>
+                <option value="health">Health</option>
+                <option value="personal">Personal</option>
+                <option value="rest">Rest</option>
+                <option value="other">Other</option>
+              </select>
+              <label>From <input id="timeBlockStart" type="time" step="300" required /></label>
+              <label id="timeBlockEndLabel">To <input id="timeBlockEnd" type="time" step="300" required /></label>
+              <button class="primary-button compact" id="timeBlockSave" type="submit">Add block</button>
+              <button class="ghost-button" id="timeBlockCancel" type="button" hidden>Cancel</button>
+              <div class="time-block-repeat">
+                <span>Repeat on</span>
+                <div class="time-block-repeat-days" id="timeBlockRepeatDays" aria-label="Repeat block on days">
+                  <button type="button" data-repeat-day="0" aria-label="Sunday">S</button>
+                  <button type="button" data-repeat-day="1" aria-label="Monday">M</button>
+                  <button type="button" data-repeat-day="2" aria-label="Tuesday">T</button>
+                  <button type="button" data-repeat-day="3" aria-label="Wednesday">W</button>
+                  <button type="button" data-repeat-day="4" aria-label="Thursday">T</button>
+                  <button type="button" data-repeat-day="5" aria-label="Friday">F</button>
+                  <button type="button" data-repeat-day="6" aria-label="Saturday">S</button>
+                </div>
+              </div>
+            </form>
+
+            <div class="time-board" id="timeBoard">
+              <section class="time-lane-section">
+                <div class="time-lane-heading">
+                  <div><span class="time-lane-dot ideal"></span><strong>Schedule</strong></div>
+                  <div class="time-lane-meta">
+                    <span id="idealDayLabel">Academic year / Monday</span>
+                    <div class="sleep-summary" id="sleepSummary"></div>
+                  </div>
+                </div>
+                <div class="time-lane" id="idealTimeLane" data-time-kind="ideal"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel calendar-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Everything dated</p>
+                <h3>Calendar</h3>
+              </div>
+            </div>
+            <div class="calendar-toolbar">
+              <button class="icon-button quiet" id="calendarPrev" type="button" aria-label="Previous month">&lt;</button>
+              <div class="calendar-month-strip" id="calendarMonthStrip" aria-label="Calendar month"></div>
+              <input id="calendarYearInput" type="number" min="1900" max="2200" aria-label="Calendar year" />
+              <button class="icon-button quiet" id="calendarNext" type="button" aria-label="Next month">&gt;</button>
+            </div>
+            <div class="calendar-month" id="calendarMonth"></div>
+            <div class="today-grid">
+              <div>
+                <h4>Today's tasks</h4>
+                <ul class="task-list" id="todayTaskList"></ul>
+              </div>
+              <div class="day-planner" id="dayPlanner">
+                <div class="day-planner-heading">
+                  <h4 id="selectedDayTitle">Today</h4>
+                  <button class="event-close" id="eventClose" type="button" aria-label="Close event window">x</button>
+                </div>
+                <div class="event-composer" id="eventComposer">
+                  <input id="eventName" type="text" placeholder="Event name" autocomplete="off" />
+                  <div class="event-style-picker">
+                    <div class="event-category-row" id="eventCategoryControls" aria-label="Event category">
+                      <button class="active" type="button" data-event-category="school">Academics</button>
+                      <button type="button" data-event-category="exam">Exam prep</button>
+                      <button type="button" data-event-category="practice">Practice</button>
+                      <button type="button" data-event-category="creative">Creative</button>
+                      <button type="button" data-event-category="personal">Personal</button>
+                      <button type="button" data-event-category="health">Health</button>
+                      <button type="button" data-event-category="deadline">Deadline</button>
+                    </div>
+                    <div class="event-color-palette" id="eventColorPalette" aria-label="Event color">
+                      <button class="active event-color-1" type="button" data-event-color="1" aria-label="Indigo"></button>
+                      <button class="event-color-2" type="button" data-event-color="2" aria-label="Sage"></button>
+                      <button class="event-color-0" type="button" data-event-color="0" aria-label="Mauve"></button>
+                      <button class="event-color-3" type="button" data-event-color="3" aria-label="Gold"></button>
+                      <button class="event-color-4" type="button" data-event-color="4" aria-label="Clay"></button>
+                      <button class="event-color-5" type="button" data-event-color="5" aria-label="Atlas blue"></button>
+                    </div>
+                  </div>
+                  <div class="segmented compact" id="eventSpanMode" aria-label="Event date mode">
+                    <button class="active" type="button" data-span-mode="on">On</button>
+                    <button type="button" data-span-mode="span">Spanning</button>
+                  </div>
+                  <div class="date-row event-dates">
+                    <label>
+                      On
+                      <input id="eventStart" type="date" />
+                    </label>
+                    <label id="eventEndLabel" hidden>
+                      To
+                      <input id="eventEnd" type="date" />
+                    </label>
+                  </div>
+                  <div class="segmented compact" id="eventTimeMode" aria-label="Event time mode">
+                    <button class="active" type="button" data-time-mode="none">Any time</button>
+                    <button type="button" data-time-mode="at">At</button>
+                    <button type="button" data-time-mode="span">From-To</button>
+                  </div>
+                  <div class="date-row event-time-row">
+                    <label id="eventTimeLabel" hidden>
+                      Time
+                      <input id="eventTime" type="hidden" />
+                      <div class="time-wheel" id="eventTimeWheel" aria-label="Start time"></div>
+                    </label>
+                    <label id="eventEndTimeLabel" hidden>
+                      To
+                      <input id="eventEndTime" type="hidden" />
+                      <div class="time-wheel" id="eventEndTimeWheel" aria-label="End time"></div>
+                    </label>
+                    <label id="eventMinutesLabel" hidden>
+                      Length
+                      <input id="eventMinutes" type="number" min="5" max="240" step="5" placeholder="Optional" />
+                    </label>
+                  </div>
+                  <button class="primary-button compact" id="eventAdd" type="button">Add event</button>
+                </div>
+                <div class="study-list" id="studyList"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel habits-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Daily rhythm</p>
+                <h3>Habits</h3>
+              </div>
+            </div>
+            <div class="habit-list" id="habitList"></div>
+            <form class="inline-form habit-new-form" id="habitForm">
+              <span class="habit-new-label">New habit</span>
+              <input id="habitInput" type="text" placeholder="Small daily rhythm" autocomplete="off" />
+              <button type="submit">Add</button>
+            </form>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="folderModal" hidden>
+      <form class="modal draggable-modal" id="folderForm">
+        <div class="modal-handle" id="folderModalHandle" title="Drag to move">
+          <p class="eyebrow" id="folderModalKicker">New area</p>
+          <span aria-hidden="true">::::</span>
+        </div>
+        <h3 id="folderModalTitle">Name this life area</h3>
+        <input id="folderNameInput" type="text" autocomplete="off" placeholder="Area name" />
+        <div class="customize-grid">
+          <label>
+            Sidebar icon
+            <input id="folderIconInput" type="text" maxlength="2" placeholder="LA" />
+          </label>
+          <label>
+            Color
+            <select id="folderColorInput">
+              <option value="#4f6f52">Sage</option>
+              <option value="#5b6f9c">Indigo</option>
+              <option value="#9f6235">Copper</option>
+              <option value="#8a6f9f">Mauve</option>
+              <option value="#9b4938">Clay</option>
+              <option value="#365d7e">Atlas Blue</option>
+            </select>
+            <span class="color-preview">
+              <span class="color-swatch" id="folderColorSwatch"></span>
+              <span id="folderColorName">Sage</span>
+            </span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost-button" id="cancelFolderModal" type="button">Cancel</button>
+          <button class="primary-button compact" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop" id="deleteModal" hidden>
+      <div class="modal">
+        <p class="eyebrow">Remove area</p>
+        <h3 id="deleteModalTitle">Remove this area?</h3>
+        <p class="modal-copy" id="deleteModalCopy">This also removes its smaller areas, tasks, notes, and exams.</p>
+        <div class="modal-actions">
+          <button class="ghost-button" id="cancelDeleteModal" type="button">Cancel</button>
+          <button class="danger-button" id="confirmDeleteModal" type="button">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="examRenameModal" hidden>
+      <form class="modal" id="examRenameForm">
+        <p class="eyebrow">Rename exam</p>
+        <h3>Update the exam name</h3>
+        <input id="examRenameInput" type="text" autocomplete="off" placeholder="Exam name" />
+        <div class="modal-actions">
+          <button class="ghost-button" id="cancelExamRename" type="button">Cancel</button>
+          <button class="primary-button compact" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop" id="sleepTrendModal" hidden>
+      <div class="modal sleep-trend-modal">
+        <div class="sleep-trend-head">
+          <div>
+            <p class="eyebrow">Sleep trends</p>
+            <h3>Sleep log</h3>
+          </div>
+          <button class="icon-button quiet" id="sleepTrendClose" type="button" aria-label="Close sleep trends">x</button>
+        </div>
+        <div class="segmented compact sleep-trend-range" id="sleepTrendRange" aria-label="Sleep trend range">
+          <button class="active" type="button" data-sleep-range="week">Week</button>
+          <button type="button" data-sleep-range="month">Month</button>
+          <button type="button" data-sleep-range="all">All</button>
+        </div>
+        <div class="sleep-trend-stats" id="sleepTrendStats"></div>
+        <div class="sleep-trend-chart" id="sleepTrendChart"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="celebration" id="celebration" aria-hidden="true"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
