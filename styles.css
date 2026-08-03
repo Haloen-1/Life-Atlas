@@ -469,6 +469,7 @@ button:disabled {
 .content-grid[data-app-view="brain"],
 .content-grid[data-app-view="time"],
 .content-grid[data-app-view="habits"],
+.content-grid[data-app-view="finance"],
 .content-grid[data-app-view="exams"] {
   grid-template-columns: 1fr;
 }
@@ -477,6 +478,7 @@ button:disabled {
 .content-grid[data-app-view="brain"] .panel,
 .content-grid[data-app-view="time"] .panel,
 .content-grid[data-app-view="habits"] .panel,
+.content-grid[data-app-view="finance"] .panel,
 .content-grid[data-app-view="exams"] .panel {
   display: none;
 }
@@ -485,6 +487,7 @@ button:disabled {
 .content-grid[data-app-view="life"] .brain-panel,
 .content-grid[data-app-view="life"] .time-tracker-panel,
 .content-grid[data-app-view="life"] .habits-panel,
+.content-grid[data-app-view="life"] .finance-panel,
 .content-grid[data-app-view="life"] .exam-panel {
   display: none;
 }
@@ -493,6 +496,7 @@ button:disabled {
 .content-grid[data-app-view="brain"] .brain-panel,
 .content-grid[data-app-view="time"] .time-tracker-panel,
 .content-grid[data-app-view="habits"] .habits-panel,
+.content-grid[data-app-view="finance"] .finance-panel,
 .content-grid[data-app-view="exams"] .exam-panel {
   display: block;
 }
@@ -1515,7 +1519,8 @@ textarea {
 
 .calendar-panel,
 .time-tracker-panel,
-.habits-panel {
+.habits-panel,
+.finance-panel {
   grid-column: 1 / -1;
   display: none;
 }
@@ -2427,10 +2432,34 @@ textarea {
 }
 
 .study-list,
-.habit-list {
+.habit-list,
+.finance-list {
   display: grid;
   gap: 10px;
   margin-top: 16px;
+}
+
+.habit-date-control {
+  width: fit-content;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(150px, 190px);
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 253, 247, 0.7);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.habit-date-control input {
+  min-height: 34px;
+  border-radius: 7px;
+  background: #fffdf7;
 }
 
 .habit-new-form {
@@ -2532,6 +2561,98 @@ textarea {
   font-weight: 900;
 }
 
+.finance-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.finance-summary article {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 253, 247, 0.74);
+}
+
+.finance-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  margin-bottom: 6px;
+}
+
+.finance-summary strong {
+  font-size: clamp(1.2rem, 2.2vw, 2rem);
+}
+
+.finance-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.4fr) minmax(120px, 0.35fr) minmax(140px, 0.35fr) minmax(160px, 0.7fr) auto;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px dashed rgba(222, 213, 197, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 253, 247, 0.52);
+}
+
+.finance-form input,
+.finance-form select {
+  min-height: 38px;
+}
+
+.finance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdf7;
+}
+
+.finance-card.expense {
+  border-left-color: var(--danger);
+}
+
+.finance-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.finance-card span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.finance-card-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.finance-card-side b {
+  color: var(--green-dark);
+  white-space: nowrap;
+}
+
+.finance-card.expense .finance-card-side b {
+  color: var(--danger);
+}
+
+.finance-card-side button {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .row-actions {
   display: flex;
   gap: 8px;
@@ -2573,7 +2694,8 @@ textarea {
 }
 
 .content-grid[data-app-view="calendar"] .calendar-panel,
-.content-grid[data-app-view="habits"] .habits-panel {
+.content-grid[data-app-view="habits"] .habits-panel,
+.content-grid[data-app-view="finance"] .finance-panel {
   display: block;
 }
 
@@ -2897,6 +3019,8 @@ textarea {
 
   .inline-form,
   .exam-form,
+  .finance-form,
+  .finance-summary,
   .sleep-routine-card,
   .time-block-form,
   .time-board {
@@ -2929,6 +3053,21 @@ textarea {
 
   .habit-new-form {
     width: 100%;
+  }
+
+  .habit-date-control {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .finance-card,
+  .finance-card-side {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .finance-card {
+    grid-template-columns: 1fr;
   }
 
   .sleep-routine-card label {

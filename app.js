@@ -40,6 +40,7 @@ const defaultState = {
   selectedBrainNoteId: null,
   brainNotes: [],
   habits: [],
+  financeTransactions: [],
   studyPlans: [],
   timeTrackerDate: dateKey(new Date()),
   timeScheduleSeason: seasonForDate(new Date()),
@@ -128,8 +129,19 @@ const els = {
   folderColorName: document.querySelector("#folderColorName"),
   folderModalHandle: document.querySelector("#folderModalHandle"),
   habitForm: document.querySelector("#habitForm"),
+  habitDate: document.querySelector("#habitDate"),
   habitInput: document.querySelector("#habitInput"),
   habitList: document.querySelector("#habitList"),
+  financeAmount: document.querySelector("#financeAmount"),
+  financeBalance: document.querySelector("#financeBalance"),
+  financeDate: document.querySelector("#financeDate"),
+  financeExpenses: document.querySelector("#financeExpenses"),
+  financeForm: document.querySelector("#financeForm"),
+  financeIncome: document.querySelector("#financeIncome"),
+  financeList: document.querySelector("#financeList"),
+  financeName: document.querySelector("#financeName"),
+  financeSource: document.querySelector("#financeSource"),
+  financeType: document.querySelector("#financeType"),
   cancelFolderModal: document.querySelector("#cancelFolderModal"),
   contentGrid: document.querySelector("#contentGrid"),
   folderPanel: document.querySelector(".folder-panel"),
@@ -286,6 +298,8 @@ els.showNextExam.addEventListener("click", () => {
 });
 els.examForm.addEventListener("submit", addExam);
 els.habitForm.addEventListener("submit", addHabit);
+els.habitDate.addEventListener("change", () => renderHabits());
+els.financeForm.addEventListener("submit", addFinanceTransaction);
 els.sleepRoutineForm.addEventListener("submit", saveSleepRoutine);
 els.sleepRoutineClear.addEventListener("click", clearSleepRoutine);
 els.sleepTrendOpen.addEventListener("click", openSleepTrendModal);
@@ -796,6 +810,18 @@ function ensureStateShape() {
     if (!habit.createdAt) habit.createdAt = Date.now();
     if (typeof habit.order !== "number") habit.order = habit.createdAt || Date.now();
   });
+  if (!Array.isArray(state.financeTransactions)) state.financeTransactions = [];
+  state.financeTransactions = state.financeTransactions
+    .filter((item) => item && item.id && item.name && Number(item.amount) > 0)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      amount: Number(item.amount),
+      type: item.type === "expense" ? "expense" : "income",
+      date: item.date || todayKey(),
+      source: item.source || "",
+      createdAt: item.createdAt || Date.now()
+    }));
   if (!Array.isArray(state.studyPlans)) state.studyPlans = [];
   state.studyPlans.forEach((plan) => {
     if (!plan.start) plan.start = dateKey(new Date(plan.createdAt || Date.now()));
@@ -1345,17 +1371,20 @@ function addHabit(event) {
   render();
 }
 
-function toggleHabit(habitId) {
+function selectedHabitDate() {
+  return els.habitDate.value || todayKey();
+}
+
+function toggleHabit(habitId, key = selectedHabitDate()) {
   const habit = state.habits.find((item) => item.id === habitId);
   if (!habit) return;
 
-  const today = todayKey();
   habit.completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
-  if (habit.completedDates.includes(today)) {
-    habit.completedDates = habit.completedDates.filter((date) => date !== today);
+  if (habit.completedDates.includes(key)) {
+    habit.completedDates = habit.completedDates.filter((date) => date !== key);
   } else {
-    habit.completedDates.push(today);
-    celebrate();
+    habit.completedDates.push(key);
+    if (key === todayKey()) celebrate();
   }
 
   saveState();
@@ -1386,6 +1415,36 @@ function reorderHabit(draggedId, targetId) {
   habits.forEach((habit, index) => {
     habit.order = index + 1;
   });
+  saveState();
+  render();
+}
+
+function addFinanceTransaction(event) {
+  event.preventDefault();
+  const name = els.financeName.value.trim();
+  const amount = Number(els.financeAmount.value);
+  if (!name || !Number.isFinite(amount) || amount <= 0) return;
+
+  state.financeTransactions.push({
+    id: createId(),
+    name,
+    amount,
+    type: els.financeType.value === "expense" ? "expense" : "income",
+    date: els.financeDate.value || todayKey(),
+    source: els.financeSource.value.trim(),
+    createdAt: Date.now()
+  });
+
+  els.financeName.value = "";
+  els.financeAmount.value = "";
+  els.financeSource.value = "";
+  els.financeDate.value = todayKey();
+  saveState();
+  render();
+}
+
+function deleteFinanceTransaction(id) {
+  state.financeTransactions = state.financeTransactions.filter((item) => item.id !== id);
   saveState();
   render();
 }
@@ -2019,6 +2078,7 @@ function render() {
   renderTasks(visibleTasks, topic.id);
   renderExams(visibleExams);
   renderHabits();
+  renderFinance();
   renderCalendar();
   renderTimeTracker();
   renderBrainBoard();
@@ -2041,6 +2101,7 @@ function titleForAppView(appView) {
   return {
     calendar: "Calendar",
     brain: "Blabber Board",
+    finance: "Money",
     time: "Schedule",
     habits: "Habit Tracker",
     exams: "Big Exams"
@@ -2341,17 +2402,19 @@ function renderExams(exams) {
 
 function renderHabits() {
   els.habitList.innerHTML = "";
+  if (!els.habitDate.value) els.habitDate.value = todayKey();
+  const selectedDate = selectedHabitDate();
+  const selectedLabel = selectedDate === todayKey() ? "today" : shortDate(selectedDate);
 
   if (!state.habits.length) {
     els.habitList.innerHTML = `<div class="empty">No habits yet. Add one daily rhythm to track.</div>`;
     return;
   }
 
-  const today = todayKey();
   const orderedHabits = [...state.habits].sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt));
   orderedHabits.forEach((habit, index) => {
     const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
-    const done = completedDates.includes(today);
+    const done = completedDates.includes(selectedDate);
     const currentStreak = habitStreak(completedDates);
     const bestStreak = bestHabitStreak(completedDates);
     const card = document.createElement("article");
@@ -2361,14 +2424,14 @@ function renderHabits() {
     card.innerHTML = `
       <div>
         <strong>${escapeHtml(habit.name)}</strong>
-        <span>Current ${currentStreak} / Best ${bestStreak}</span>
+        <span>${done ? `Done ${selectedLabel}` : `Not marked ${selectedLabel}`} / Current ${currentStreak} / Best ${bestStreak}</span>
       </div>
       <div class="row-actions">
         <button type="button" data-action="toggle">${done ? "Done" : "Check"}</button>
         <button type="button" data-action="delete">x</button>
       </div>
     `;
-    card.querySelector('[data-action="toggle"]').addEventListener("click", () => toggleHabit(habit.id));
+    card.querySelector('[data-action="toggle"]').addEventListener("click", () => toggleHabit(habit.id, selectedDate));
     card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteHabit(habit.id));
     card.addEventListener("dragstart", (event) => {
       if (event.target.closest("button")) {
@@ -2402,6 +2465,47 @@ function renderHabits() {
       draggedHabitId = null;
     });
     els.habitList.appendChild(card);
+  });
+}
+
+function renderFinance() {
+  if (!els.financeDate.value) els.financeDate.value = todayKey();
+  const transactions = [...state.financeTransactions].sort((a, b) =>
+    (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0)
+  );
+  const income = transactions
+    .filter((item) => item.type === "income")
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const expenses = transactions
+    .filter((item) => item.type === "expense")
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const balance = income - expenses;
+
+  els.financeBalance.textContent = formatMoney(balance);
+  els.financeIncome.textContent = formatMoney(income);
+  els.financeExpenses.textContent = formatMoney(expenses);
+  els.financeList.innerHTML = "";
+
+  if (!transactions.length) {
+    els.financeList.innerHTML = `<div class="empty">No money logged yet. Add income or expenses as they happen.</div>`;
+    return;
+  }
+
+  transactions.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = `finance-card ${item.type}`;
+    card.innerHTML = `
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(shortDate(item.date || todayKey()))}${item.source ? ` / ${escapeHtml(item.source)}` : ""}</span>
+      </div>
+      <div class="finance-card-side">
+        <b>${item.type === "expense" ? "-" : "+"}${formatMoney(item.amount)}</b>
+        <button type="button" aria-label="Delete money entry">x</button>
+      </div>
+    `;
+    card.querySelector("button").addEventListener("click", () => deleteFinanceTransaction(item.id));
+    els.financeList.appendChild(card);
   });
 }
 
@@ -3303,6 +3407,15 @@ function shortDate(value) {
     month: "short",
     day: "numeric"
   }).format(date);
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(value || 0));
 }
 
 function formatTime(value) {
