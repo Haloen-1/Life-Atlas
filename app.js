@@ -118,6 +118,7 @@ const els = {
   examTime: document.querySelector("#examTime"),
   examYear: document.querySelector("#examYear"),
   exportCalendar: document.querySelector("#exportCalendar"),
+  exportData: document.querySelector("#exportData"),
   folderForm: document.querySelector("#folderForm"),
   folderModal: document.querySelector("#folderModal"),
   folderModalKicker: document.querySelector("#folderModalKicker"),
@@ -142,6 +143,8 @@ const els = {
   financeName: document.querySelector("#financeName"),
   financeSource: document.querySelector("#financeSource"),
   financeType: document.querySelector("#financeType"),
+  importData: document.querySelector("#importData"),
+  importDataFile: document.querySelector("#importDataFile"),
   cancelFolderModal: document.querySelector("#cancelFolderModal"),
   contentGrid: document.querySelector("#contentGrid"),
   folderPanel: document.querySelector(".folder-panel"),
@@ -402,6 +405,9 @@ els.eventColorPalette.addEventListener("click", (event) => {
 els.eventAdd.addEventListener("click", addCalendarEvent);
 els.eventClose.addEventListener("click", closeCalendarPlanner);
 els.exportCalendar.addEventListener("click", exportCalendar);
+els.exportData.addEventListener("click", exportLifeAtlasData);
+els.importData.addEventListener("click", () => els.importDataFile.click());
+els.importDataFile.addEventListener("change", importLifeAtlasData);
 els.enableNotifications.addEventListener("click", requestNotifications);
 els.topicNotes.addEventListener("input", () => {
   saveCurrentNotes();
@@ -941,6 +947,67 @@ function moveTopicHierarchy(draggedId, targetId, mode) {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function exportLifeAtlasData() {
+  saveCurrentNotes();
+  const backup = {
+    app: "Life Atlas",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    page: location.href,
+    storageKey: STORAGE_KEY,
+    data: state
+  };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  downloadTextFile(`life-atlas-backup-${stamp}.json`, JSON.stringify(backup, null, 2), "application/json");
+  showToast("Life Atlas backup exported.");
+}
+
+async function importLifeAtlasData(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const imported = parsed.data || parsed;
+    if (!isValidLifeAtlasState(imported)) {
+      showToast("That file does not look like a Life Atlas backup.");
+      return;
+    }
+    if (!window.confirm("Import this backup? This replaces the current Life Atlas data in this browser.")) return;
+
+    localStorage.setItem(`${STORAGE_KEY}-before-import`, JSON.stringify(state));
+    state = imported;
+    ensureStateShape();
+    saveState();
+    render();
+    showToast("Backup imported.");
+  } catch {
+    showToast("Backup import failed. Try a Life Atlas JSON file.");
+  }
+}
+
+function isValidLifeAtlasState(value) {
+  return Boolean(value
+    && Array.isArray(value.topics)
+    && value.topics.some((topic) => topic.id === "root")
+    && Array.isArray(value.tasks)
+    && Array.isArray(value.habits)
+    && Array.isArray(value.studyPlans));
+}
+
+function downloadTextFile(filename, text, type = "text/plain") {
+  const blob = new Blob([text], { type });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
 function saveCurrentNotes() {

@@ -65,6 +65,12 @@
             <button class="ghost-button" id="exportCalendar" type="button">
               Export exams
             </button>
+            <button class="ghost-button" id="exportData" type="button">
+              Export data
+            </button>
+            <button class="ghost-button" id="importData" type="button">
+              Import data
+            </button>
           </div>
         </header>
 
@@ -505,6 +511,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <div class="celebration" id="celebration" aria-hidden="true"></div>
+    <input id="importDataFile" type="file" accept=".json,application/json" hidden />
 
     <script src="app.js"></script>
   </body>
