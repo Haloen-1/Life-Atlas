@@ -1,0 +1,12 @@
+# Local launchers and preview tools
+Life Atlas.cmd
+Install Life Atlas.cmd
+install-app.ps1
+Preview Life Atlas.cmd
+preview-server.ps1
+Life Atlas Website Files.zip
+desktop.ini
+
+# Private exports and local code rollback archives
+life-atlas-backup-*.json
+Life-Atlas-code-*.zip
