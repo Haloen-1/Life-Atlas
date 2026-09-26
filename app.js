@@ -21,6 +21,15 @@ const EVENT_CATEGORIES = {
 };
 
 const DEFAULT_EVENT_CATEGORY = "school";
+const OPTIONAL_SECTIONS = [
+  { id: "map", label: "Map" },
+  { id: "brain", label: "Blabber" },
+  { id: "calendar", label: "Calendar" },
+  { id: "time", label: "Schedule" },
+  { id: "habits", label: "Habits" },
+  { id: "finance", label: "Money" },
+  { id: "exams", label: "Exams" }
+];
 
 const defaultState = {
   selectedTopicId: "root",
@@ -47,6 +56,30 @@ const defaultState = {
   timeScheduleDay: new Date().getDay(),
   timeBlocks: [],
   sleepLogs: [],
+  scheduleSeasons: [
+    { id: "school", name: "Academic year" },
+    { id: "summer", name: "Summer" }
+  ],
+  activityHistory: [],
+  settings: {
+    theme: "sage",
+    gentleMotion: true,
+    mapShowNotes: true,
+    mapOrientation: "horizontal",
+    visibleSections: {
+      map: true,
+      brain: true,
+      calendar: true,
+      time: true,
+      habits: true,
+      finance: true,
+      exams: true
+    }
+  },
+  mapPositions: {
+    horizontal: {},
+    vertical: {}
+  },
   topics: [
     {
       id: "root",
@@ -80,6 +113,13 @@ let timeBlockDrag = null;
 let timeBlockDraftDays = [];
 let sleepTrendRange = "week";
 let scheduleUndoStack = [];
+let studioTab = "focus";
+let pendingTaskAnimations = new Set();
+let mapZoom = 1;
+let mapNodeDrag = null;
+let suppressMapClickId = null;
+let folderModalCloseTimer = null;
+let lastRenderedViewKey = null;
 
 const els = {
   addRootTopic: document.querySelector("#addRootTopic"),
@@ -104,7 +144,6 @@ const els = {
   currentTitle: document.querySelector("#currentTitle"),
   breadcrumbs: document.querySelector("#breadcrumbs"),
   deleteTopic: document.querySelector("#deleteTopic"),
-  enableNotifications: document.querySelector("#enableNotifications"),
   examDay: document.querySelector("#examDay"),
   examForm: document.querySelector("#examForm"),
   examList: document.querySelector("#examList"),
@@ -150,6 +189,7 @@ const els = {
   folderPanel: document.querySelector(".folder-panel"),
   taskPanel: document.querySelector(".task-panel"),
   notesPanel: document.querySelector(".notes-panel"),
+  brainPanel: document.querySelector(".brain-panel"),
   deleteModal: document.querySelector("#deleteModal"),
   deleteModalTitle: document.querySelector("#deleteModalTitle"),
   deleteModalCopy: document.querySelector("#deleteModalCopy"),
@@ -159,6 +199,15 @@ const els = {
   nextExamMetric: document.querySelector("#nextExamMetric"),
   nextExam: document.querySelector("#nextExam"),
   openTaskCount: document.querySelector("#openTaskCount"),
+  noteCount: document.querySelector("#noteCount"),
+  noteMetricDetail: document.querySelector("#noteMetricDetail"),
+  mapShowNotes: document.querySelector("#mapShowNotes"),
+  mapZoomOut: document.querySelector("#mapZoomOut"),
+  mapZoomIn: document.querySelector("#mapZoomIn"),
+  mapReset: document.querySelector("#mapReset"),
+  mapOrientation: document.querySelector("#mapOrientation"),
+  mapViewport: document.querySelector("#mapViewport"),
+  areaMap: document.querySelector("#areaMap"),
   renameTopic: document.querySelector("#renameTopic"),
   showNextExam: document.querySelector("#showNextExam"),
   taskForm: document.querySelector("#taskForm"),
@@ -220,7 +269,22 @@ const els = {
   notesWorkspace: document.querySelector("#notesWorkspace"),
   topicTree: document.querySelector("#topicTree"),
   subjectTabs: document.querySelector("#subjectTabs"),
-  celebration: document.querySelector("#celebration")
+  celebration: document.querySelector("#celebration"),
+  studioLauncher: document.querySelector("#studioLauncher"),
+  studioDrawer: document.querySelector("#studioDrawer"),
+  studioClose: document.querySelector("#studioClose"),
+  studioTabs: document.querySelector("#studioTabs"),
+  studioProgressTitle: document.querySelector("#studioProgressTitle"),
+  studioProgressBar: document.querySelector("#studioProgressBar"),
+  studioProgressCopy: document.querySelector("#studioProgressCopy"),
+  historyCount: document.querySelector("#historyCount"),
+  historyList: document.querySelector("#historyList"),
+  appThemeSelect: document.querySelector("#appThemeSelect"),
+  sectionVisibility: document.querySelector("#sectionVisibility"),
+  motionToggle: document.querySelector("#motionToggle"),
+  seasonManager: document.querySelector("#seasonManager"),
+  seasonAddForm: document.querySelector("#seasonAddForm"),
+  seasonNameInput: document.querySelector("#seasonNameInput")
 };
 
 ensureStateShape();
@@ -408,7 +472,6 @@ els.exportCalendar.addEventListener("click", exportCalendar);
 els.exportData.addEventListener("click", exportLifeAtlasData);
 els.importData.addEventListener("click", () => els.importDataFile.click());
 els.importDataFile.addEventListener("change", importLifeAtlasData);
-els.enableNotifications.addEventListener("click", requestNotifications);
 els.topicNotes.addEventListener("input", () => {
   saveCurrentNotes();
 });
@@ -416,13 +479,96 @@ els.topicNotes.addEventListener("keydown", handleRichNoteKeydown);
 els.toggleNotes.addEventListener("click", toggleNotesPanel);
 setupPriorityPanelDrag();
 
+els.studioLauncher.addEventListener("click", () => {
+  const isOpen = els.studioLauncher.getAttribute("aria-expanded") === "true";
+  toggleStudioDrawer(!isOpen);
+});
+els.studioClose.addEventListener("click", () => toggleStudioDrawer(false));
+els.studioTabs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-studio-tab]");
+  if (!button) return;
+  setStudioTab(button.dataset.studioTab);
+});
+els.studioDrawer.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-studio-action]")?.dataset.studioAction;
+  if (!action) return;
+  if (action === "task") {
+    toggleStudioDrawer(false);
+    if (state.appView !== "life") pushHistory();
+    state.appView = "life";
+    currentTopic().view = "homework";
+    saveState();
+    render();
+    els.taskInput.focus();
+  }
+  if (action === "area") {
+    toggleStudioDrawer(false);
+    openFolderModal("add", state.selectedTopicId);
+  }
+  if (action === "export") exportLifeAtlasData();
+  if (action === "import") els.importDataFile.click();
+  if (action === "notifications") requestNotifications();
+});
+els.appThemeSelect.addEventListener("change", () => {
+  state.settings.theme = els.appThemeSelect.value;
+  saveState();
+  applyAppSettings();
+});
+els.sectionVisibility.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-section-visibility]");
+  if (!input) return;
+  const sectionId = input.dataset.sectionVisibility;
+  state.settings.visibleSections[sectionId] = input.checked;
+  if (!input.checked && state.appView === sectionId) state.appView = "life";
+  saveState();
+  render();
+  setStudioTab("settings");
+});
+els.motionToggle.addEventListener("change", () => {
+  state.settings.gentleMotion = els.motionToggle.checked;
+  saveState();
+  applyAppSettings();
+});
+els.seasonAddForm.addEventListener("submit", addScheduleSeason);
+els.mapShowNotes.addEventListener("change", () => {
+  state.settings.mapShowNotes = els.mapShowNotes.checked;
+  saveState();
+  renderMap();
+});
+els.mapOrientation.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-map-orientation]");
+  if (!button) return;
+  state.settings.mapOrientation = button.dataset.mapOrientation;
+  mapZoom = 1;
+  saveState();
+  renderMap();
+});
+els.mapZoomOut.addEventListener("click", () => {
+  mapZoom = Math.max(0.65, Number((mapZoom - 0.15).toFixed(2)));
+  updateMapZoom();
+});
+els.mapZoomIn.addEventListener("click", () => {
+  mapZoom = Math.min(1.8, Number((mapZoom + 0.15).toFixed(2)));
+  updateMapZoom();
+});
+els.mapReset.addEventListener("click", () => {
+  mapZoom = 1;
+  state.mapPositions[state.settings.mapOrientation] = {};
+  saveState();
+  renderMap();
+  updateMapZoom();
+  els.mapViewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+});
+window.addEventListener("pointermove", moveMapNode);
+window.addEventListener("pointerup", stopMapNodeDrag);
+
 function setupPriorityPanelDrag() {
   [
     { panel: els.taskPanel, name: "tasks" },
     { panel: els.notesPanel, name: "notes" }
   ].forEach(({ panel, name }) => {
     panel.addEventListener("dragstart", (event) => {
-      if (state.appView !== "life" || isSubjectFolder(currentTopic().id)) {
+      if (state.appView !== "life" || els.contentGrid.classList.contains("subject-mode")) {
         event.preventDefault();
         return;
       }
@@ -472,6 +618,155 @@ function clearPriorityDropTargets(exceptPanel) {
   [els.taskPanel, els.notesPanel].forEach((panel) => {
     if (panel !== exceptPanel) panel.classList.remove("panel-drop-target");
   });
+}
+
+function toggleStudioDrawer(open) {
+  if (open) {
+    els.studioDrawer.hidden = false;
+    els.studioDrawer.setAttribute("aria-hidden", "false");
+    els.studioLauncher.setAttribute("aria-expanded", "true");
+    window.requestAnimationFrame(() => els.studioDrawer.classList.add("is-open"));
+    return;
+  }
+
+  els.studioDrawer.classList.remove("is-open");
+  els.studioDrawer.setAttribute("aria-hidden", "true");
+  els.studioLauncher.setAttribute("aria-expanded", "false");
+  window.setTimeout(() => {
+    if (els.studioDrawer.getAttribute("aria-hidden") === "true") els.studioDrawer.hidden = true;
+  }, 220);
+}
+
+function setStudioTab(tab) {
+  if (!["focus", "history", "settings"].includes(tab)) return;
+  studioTab = tab;
+  els.studioTabs.querySelectorAll("[data-studio-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.studioTab === tab);
+  });
+  els.studioDrawer.querySelectorAll("[data-studio-pane]").forEach((pane) => {
+    const active = pane.dataset.studioPane === tab;
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
+  if (tab === "history") renderActivityHistory();
+}
+
+function applyAppSettings() {
+  const settings = state.settings || {};
+  document.body.dataset.theme = settings.theme || "sage";
+  document.body.classList.toggle("reduced-motion", !settings.gentleMotion);
+  els.appThemeSelect.value = settings.theme || "sage";
+  els.motionToggle.checked = settings.gentleMotion !== false;
+  els.mapShowNotes.checked = settings.mapShowNotes !== false;
+  OPTIONAL_SECTIONS.forEach((section) => {
+    const navButton = els.appNav.querySelector(`[data-app-view="${section.id}"]`);
+    if (navButton) navButton.hidden = settings.visibleSections?.[section.id] === false;
+  });
+}
+
+function renderStudio() {
+  const tasks = state.tasks || [];
+  const completed = tasks.filter((task) => task.done).length;
+  const open = tasks.length - completed;
+  const progress = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+  els.studioProgressBar.style.width = `${progress}%`;
+  els.studioProgressTitle.textContent = tasks.length
+    ? `${completed} of ${tasks.length} task${tasks.length === 1 ? "" : "s"} complete`
+    : "Start with one small step";
+  els.studioProgressCopy.textContent = open
+    ? `${open} open step${open === 1 ? "" : "s"} waiting for your attention.`
+    : tasks.length ? "Everything on your list is complete. Notice that." : "A short list is still a list. Keep the next action visible.";
+  renderActivityHistory();
+  renderSectionVisibility();
+  renderSeasonManager();
+}
+
+function renderSectionVisibility() {
+  els.sectionVisibility.innerHTML = OPTIONAL_SECTIONS.map((section) => `
+    <label class="section-visibility-row">
+      <span>${escapeHtml(section.label)}</span>
+      <input type="checkbox" data-section-visibility="${escapeHtml(section.id)}" ${state.settings.visibleSections[section.id] === false ? "" : "checked"} />
+    </label>
+  `).join("");
+}
+
+function renderActivityHistory() {
+  const history = Array.isArray(state.activityHistory) ? state.activityHistory.slice(0, 30) : [];
+  els.historyCount.textContent = String(history.length);
+  if (!history.length) {
+    els.historyList.innerHTML = `<div class="empty history-empty">Your completed work will collect here.</div>`;
+    return;
+  }
+  els.historyList.innerHTML = history.map((item) => `
+    <article class="history-item">
+      <span class="history-check" aria-hidden="true">&#10003;</span>
+      <div><strong>${escapeHtml(item.text)}</strong><small>${escapeHtml(item.context || "Life")} / ${escapeHtml(formatDateTime(item.completedAt))}</small></div>
+    </article>
+  `).join("");
+}
+
+function recordActivity(text, context) {
+  if (!text) return;
+  state.activityHistory = Array.isArray(state.activityHistory) ? state.activityHistory : [];
+  state.activityHistory.unshift({ id: createId(), text, context, completedAt: Date.now() });
+  state.activityHistory = state.activityHistory.slice(0, 100);
+}
+
+function renderSeasonManager() {
+  const seasons = Array.isArray(state.scheduleSeasons) ? state.scheduleSeasons : [];
+  els.seasonManager.innerHTML = seasons.map((season) => `
+    <div class="season-manager-row" data-season-id="${escapeHtml(season.id)}">
+      <input type="text" value="${escapeHtml(season.name)}" aria-label="Season name" />
+      <button type="button" data-season-delete aria-label="Delete ${escapeHtml(season.name)}">x</button>
+    </div>
+  `).join("");
+  els.seasonManager.querySelectorAll(".season-manager-row input").forEach((input) => {
+    input.addEventListener("change", () => renameScheduleSeason(input.closest("[data-season-id]").dataset.seasonId, input.value));
+  });
+  els.seasonManager.querySelectorAll("[data-season-delete]").forEach((button) => {
+    button.addEventListener("click", () => deleteScheduleSeason(button.closest("[data-season-id]").dataset.seasonId));
+  });
+}
+
+function seasonName(seasonId) {
+  return state.scheduleSeasons?.find((season) => season.id === seasonId)?.name || seasonId;
+}
+
+function addScheduleSeason(event) {
+  event.preventDefault();
+  const name = els.seasonNameInput.value.trim();
+  if (!name) return;
+  const id = `season-${createId()}`;
+  state.scheduleSeasons.push({ id, name });
+  state.timeScheduleSeason = id;
+  els.seasonNameInput.value = "";
+  saveState();
+  render();
+  setStudioTab("settings");
+  showToast("Season added.");
+}
+
+function renameScheduleSeason(id, name) {
+  const season = state.scheduleSeasons.find((item) => item.id === id);
+  if (!season || !name.trim()) return;
+  season.name = name.trim();
+  saveState();
+  renderTimeTracker();
+  renderSeasonManager();
+}
+
+function deleteScheduleSeason(id) {
+  if (state.scheduleSeasons.length <= 1) {
+    showToast("Keep at least one season.");
+    return;
+  }
+  state.scheduleSeasons = state.scheduleSeasons.filter((season) => season.id !== id);
+  if (state.timeScheduleSeason === id) state.timeScheduleSeason = state.scheduleSeasons[0].id;
+  state.timeBlocks = state.timeBlocks.filter((block) => block.season !== id);
+  state.sleepLogs = state.sleepLogs.filter((log) => log.season !== id);
+  saveState();
+  render();
+  showToast("Season removed.");
 }
 
 function handleNoteKeydown(event) {
@@ -843,7 +1138,45 @@ function ensureStateShape() {
     }
   });
   if (!state.timeTrackerDate) state.timeTrackerDate = todayKey();
-  if (!["school", "summer"].includes(state.timeScheduleSeason)) state.timeScheduleSeason = seasonForDate(now);
+  if (!Array.isArray(state.scheduleSeasons) || !state.scheduleSeasons.length) {
+    state.scheduleSeasons = clone(defaultState.scheduleSeasons);
+  }
+  state.scheduleSeasons = state.scheduleSeasons
+    .filter((season) => season && season.id && season.name)
+    .map((season) => ({ id: String(season.id), name: String(season.name).trim() || "Season" }));
+  if (!state.scheduleSeasons.length) state.scheduleSeasons = clone(defaultState.scheduleSeasons);
+  if (!state.scheduleSeasons.some((season) => season.id === state.timeScheduleSeason)) {
+    const autoSeason = seasonForDate(now);
+    state.timeScheduleSeason = state.scheduleSeasons.some((season) => season.id === autoSeason)
+      ? autoSeason
+      : state.scheduleSeasons[0].id;
+  }
+  if (!Array.isArray(state.activityHistory)) state.activityHistory = [];
+  state.activityHistory = state.activityHistory
+    .filter((item) => item && item.text)
+    .map((item) => ({
+      id: item.id || createId(),
+      text: String(item.text),
+      context: String(item.context || "Life"),
+      completedAt: item.completedAt || Date.now()
+    }))
+    .slice(0, 100);
+  if (!state.settings || typeof state.settings !== "object") state.settings = clone(defaultState.settings);
+  if (!["sage", "blue", "plum", "night"].includes(state.settings.theme)) state.settings.theme = "sage";
+  state.settings.gentleMotion = state.settings.gentleMotion !== false;
+  state.settings.mapShowNotes = state.settings.mapShowNotes !== false;
+  if (!["horizontal", "vertical"].includes(state.settings.mapOrientation)) state.settings.mapOrientation = "horizontal";
+  if (!state.settings.visibleSections || typeof state.settings.visibleSections !== "object") {
+    state.settings.visibleSections = clone(defaultState.settings.visibleSections);
+    if (state.settings.showBlabber === false) state.settings.visibleSections.brain = false;
+  }
+  OPTIONAL_SECTIONS.forEach((section) => {
+    state.settings.visibleSections[section.id] = state.settings.visibleSections[section.id] !== false;
+  });
+  if (state.appView !== "life" && state.settings.visibleSections[state.appView] === false) state.appView = "life";
+  if (!state.mapPositions || typeof state.mapPositions !== "object") state.mapPositions = clone(defaultState.mapPositions);
+  if (!state.mapPositions.horizontal || typeof state.mapPositions.horizontal !== "object") state.mapPositions.horizontal = {};
+  if (!state.mapPositions.vertical || typeof state.mapPositions.vertical !== "object") state.mapPositions.vertical = {};
   if (!Number.isInteger(state.timeScheduleDay) || state.timeScheduleDay < 0 || state.timeScheduleDay > 6) {
     state.timeScheduleDay = now.getDay();
   }
@@ -853,7 +1186,7 @@ function ensureStateShape() {
     .map((log) => ({
       id: log.id || createId(),
       date: log.date,
-      season: ["school", "summer"].includes(log.season) ? log.season : seasonForDate(new Date(`${log.date}T00:00`)),
+      season: state.scheduleSeasons.some((season) => season.id === log.season) ? log.season : seasonForDate(new Date(`${log.date}T00:00`)),
       start: log.start,
       end: log.end,
       createdAt: log.createdAt || Date.now()
@@ -873,7 +1206,7 @@ function ensureStateShape() {
         .sort((a, b) => a - b);
       if (!block.daysOfWeek.length) block.daysOfWeek = [block.dayOfWeek];
     }
-    if (block.kind === "ideal" && !["school", "summer"].includes(block.season)) block.season = "school";
+    if (block.kind === "ideal" && !state.scheduleSeasons.some((season) => season.id === block.season)) block.season = state.scheduleSeasons[0].id;
     if (!block.category) block.category = "other";
     block.instant = Boolean(block.instant || block.category === "food" && block.end === block.start);
     if (!block.start) block.start = "08:00";
@@ -1177,14 +1510,24 @@ function openFolderModal(mode, parentId, initialName = "") {
   setFolderColor(topic?.color || "#4f6f52");
   updateFolderColorPreview();
   resetModalPosition();
+  window.clearTimeout(folderModalCloseTimer);
   els.folderModal.hidden = false;
-  window.setTimeout(() => els.folderNameInput.focus(), 0);
+  els.folderModal.setAttribute("aria-hidden", "false");
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => els.folderModal.classList.add("modal-visible"));
+  });
+  window.setTimeout(() => els.folderNameInput.focus(), 190);
 }
 
 function closeFolderModal() {
-  els.folderModal.hidden = true;
-  els.folderNameInput.value = "";
-  resetModalPosition();
+  els.folderModal.classList.remove("modal-visible");
+  els.folderModal.setAttribute("aria-hidden", "true");
+  window.clearTimeout(folderModalCloseTimer);
+  folderModalCloseTimer = window.setTimeout(() => {
+    els.folderModal.hidden = true;
+    els.folderNameInput.value = "";
+    resetModalPosition();
+  }, 210);
 }
 
 function updateFolderColorPreview() {
@@ -1322,13 +1665,23 @@ function addTask(event) {
 function toggleTask(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
-
-  task.done = !task.done;
-  saveState();
-  render();
+  if (pendingTaskAnimations.has(taskId)) return;
 
   const row = document.querySelector(`[data-task-id="${taskId}"]`);
-  row?.classList.add("pop");
+  task.done = !task.done;
+  if (task.done) recordActivity(task.text, topicTitle(task.topicId));
+  saveState();
+  if (task.done && row && state.settings.gentleMotion !== false) {
+    pendingTaskAnimations.add(taskId);
+    row.classList.add("task-completing");
+    window.setTimeout(() => {
+      pendingTaskAnimations.delete(taskId);
+      render();
+      celebrate();
+    }, 360);
+    return;
+  }
+  render();
   if (task.done) celebrate();
 }
 
@@ -2092,8 +2445,9 @@ function render() {
   const topic = currentTopic();
   const appView = state.appView || "life";
   document.body.dataset.appView = appView;
-  const subjectMode = isSubjectFolder(topic.id);
-  const view = subjectMode ? topic.view || "topics" : "";
+  const subjectMode = appView === "life";
+  const view = subjectMode && ["topics", "homework", "notes"].includes(topic.view)
+    ? topic.view : subjectMode ? "topics" : "";
   const ids = descendantIds(topic.id);
   const visibleTasks = state.tasks
     .filter((task) => ids.includes(task.topicId))
@@ -2115,6 +2469,9 @@ function render() {
   }
   els.openTaskCount.textContent = state.tasks.filter((task) => !task.done).length;
   els.topicCount.textContent = String(state.topics.length - 1);
+  const noteTotal = state.topics.filter((item) => stripHtml(item.notes).trim()).length + state.brainNotes.length;
+  els.noteCount.textContent = String(noteTotal);
+  els.noteMetricDetail.textContent = noteTotal === 1 ? "One place of context" : "Places of context";
   els.nextExam.textContent = next ? `${next.name} - ${shortDate(next.when)}` : "None";
   const examTileHidden = state.hiddenExamTopicIds.includes(topic.id) || appView !== "life";
   els.nextExamMetric.hidden = examTileHidden;
@@ -2133,15 +2490,18 @@ function render() {
   els.subjectTabs.hidden = appView !== "life" || !subjectMode;
   els.subjectTabs.querySelectorAll("[data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view);
+    button.setAttribute("aria-pressed", String(button.dataset.view === view));
   });
   document.querySelector(".task-panel h3").textContent = subjectMode ? "Homework" : "Tasks";
   els.appNav.querySelectorAll("[data-app-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.appView === appView);
   });
+  applyAppSettings();
 
   renderTree();
   renderBreadcrumbs(topic.id);
   renderChildren(topic.id);
+  renderMap();
   renderTasks(visibleTasks, topic.id);
   renderExams(visibleExams);
   renderHabits();
@@ -2149,6 +2509,21 @@ function render() {
   renderCalendar();
   renderTimeTracker();
   renderBrainBoard();
+  renderStudio();
+  animateViewChange(`${appView}:${topic.id}:${view}`);
+}
+
+function animateViewChange(viewKey) {
+  if (viewKey === lastRenderedViewKey) return;
+  const initialRender = lastRenderedViewKey === null;
+  lastRenderedViewKey = viewKey;
+  els.contentGrid.getAnimations?.().forEach((animation) => animation.cancel());
+  if (initialRender || state.settings.gentleMotion === false ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  els.contentGrid.animate?.([
+    { opacity: 0.45, transform: "translateY(5px)" },
+    { opacity: 1, transform: "translateY(0)" }
+  ], { duration: 190, easing: "cubic-bezier(0.2, 0.7, 0.3, 1)" });
 }
 
 function applyTopicsPlacement() {
@@ -2166,6 +2541,7 @@ function applyTopicsPlacement() {
 
 function titleForAppView(appView) {
   return {
+    map: "Area Map",
     calendar: "Calendar",
     brain: "Blabber Board",
     finance: "Money",
@@ -2348,6 +2724,194 @@ function renderChildren(topicId) {
     });
     els.childTopics.appendChild(card);
   });
+}
+
+function renderMap() {
+  if (!els.areaMap) return;
+  const topics = state.topics.filter((topic) => topic && topic.id);
+  const byId = new Map(topics.map((topic) => [topic.id, topic]));
+  const depths = new Map();
+
+  function depthFor(topic, trail = new Set()) {
+    if (depths.has(topic.id)) return depths.get(topic.id);
+    if (trail.has(topic.id) || !topic.parentId || !byId.has(topic.parentId)) {
+      depths.set(topic.id, 0);
+      return 0;
+    }
+    const nextTrail = new Set(trail);
+    nextTrail.add(topic.id);
+    const depth = depthFor(byId.get(topic.parentId), nextTrail) + 1;
+    depths.set(topic.id, depth);
+    return depth;
+  }
+
+  topics.forEach((topic) => depthFor(topic));
+  const levels = [];
+  topics.forEach((topic) => {
+    const depth = depths.get(topic.id) || 0;
+    if (!levels[depth]) levels[depth] = [];
+    levels[depth].push(topic);
+  });
+  levels.forEach((level) => level.sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt)));
+
+  const orientation = state.settings.mapOrientation || "horizontal";
+  const nodeWidth = 198;
+  const nodeHeight = 78;
+  const layerGap = 68;
+  const itemGap = 28;
+  const largestLevel = Math.max(...levels.map((level) => level.length), 1);
+  const width = orientation === "horizontal"
+    ? Math.max(940, levels.length * (nodeWidth + layerGap) + 80)
+    : Math.max(940, largestLevel * (nodeWidth + itemGap) + 100);
+  const height = orientation === "horizontal"
+    ? Math.max(540, largestLevel * (nodeHeight + itemGap) + 110)
+    : Math.max(540, levels.length * (nodeHeight + layerGap) + 90);
+  const positions = new Map();
+
+  levels.forEach((level, depth) => {
+    if (orientation === "horizontal") {
+      const x = 40 + depth * (nodeWidth + layerGap);
+      const gap = nodeHeight + itemGap;
+      const columnHeight = level.length * gap - itemGap;
+      const startY = Math.max(28, (height - columnHeight) / 2);
+      level.forEach((topic, index) => positions.set(topic.id, { x, y: startY + index * gap }));
+      return;
+    }
+
+    const y = 36 + depth * (nodeHeight + layerGap);
+    const gap = nodeWidth + itemGap;
+    const rowWidth = level.length * gap - itemGap;
+    const startX = Math.max(40, (width - rowWidth) / 2);
+    level.forEach((topic, index) => positions.set(topic.id, { x: startX + index * gap, y }));
+  });
+
+  const savedPositions = state.mapPositions?.[orientation] || {};
+  topics.forEach((topic) => {
+    const saved = savedPositions[topic.id];
+    if (!saved || !Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return;
+    positions.set(topic.id, { x: Math.max(8, saved.x), y: Math.max(8, saved.y) });
+  });
+
+  const hasNotes = (topic) => Boolean(stripHtml(topic.notes).trim());
+  const showNotes = state.settings.mapShowNotes !== false;
+  const edges = topics.filter((topic) => topic.parentId && positions.has(topic.parentId)).map((topic) => {
+    const parent = positions.get(topic.parentId);
+    const child = positions.get(topic.id);
+    if (orientation === "vertical") {
+      const startY = parent.y + nodeHeight;
+      const endY = child.y;
+      const centerX = parent.x + nodeWidth / 2;
+      const childX = child.x + nodeWidth / 2;
+      const curve = Math.max(30, Math.abs(endY - startY) * 0.52);
+      return `<path class="map-edge" d="M ${centerX} ${startY} C ${centerX} ${startY + curve}, ${childX} ${endY - curve}, ${childX} ${endY}" />`;
+    }
+    const startX = parent.x + nodeWidth;
+    const endX = child.x;
+    const curve = Math.max(30, (endX - startX) * 0.52);
+    return `<path class="map-edge" d="M ${startX} ${parent.y + nodeHeight / 2} C ${startX + curve} ${parent.y + nodeHeight / 2}, ${endX - curve} ${child.y + nodeHeight / 2}, ${endX} ${child.y + nodeHeight / 2}" />`;
+  }).join("");
+
+  const nodes = topics.map((topic) => {
+    const position = positions.get(topic.id);
+    const note = stripHtml(topic.notes).trim();
+    const title = truncateMapText(topic.title, 23);
+    const noteText = showNotes ? truncateMapText(note || "No note yet", 28) : "";
+    const selected = topic.id === state.selectedTopicId;
+    return `
+      <g class="map-node${selected ? " selected" : ""}${hasNotes(topic) ? " has-note" : ""}" data-map-topic-id="${escapeHtml(topic.id)}" transform="translate(${position.x},${position.y})" tabindex="0" role="button" aria-label="Open ${escapeHtml(topic.title)}">
+        <rect class="map-node-body" width="${nodeWidth}" height="${nodeHeight}" rx="14"></rect>
+        <circle class="map-node-dot" cx="20" cy="20" r="8" fill="${escapeHtml(topic.color || "#4f6f52")}"></circle>
+        <text class="map-node-title" x="36" y="25">${escapeHtml(title)}</text>
+        ${showNotes ? `<text class="map-node-note" x="18" y="51">${escapeHtml(noteText)}</text>` : ""}
+        ${hasNotes(topic) ? `<circle class="map-note-mark" cx="177" cy="19" r="4"></circle>` : ""}
+      </g>
+    `;
+  }).join("");
+
+  els.areaMap.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  els.areaMap.setAttribute("width", width);
+  els.areaMap.setAttribute("height", height);
+  els.areaMap.innerHTML = `<g class="map-layer">${edges}${nodes}</g>`;
+  updateMapZoom();
+  els.mapOrientation.querySelectorAll("[data-map-orientation]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mapOrientation === orientation);
+  });
+  els.areaMap.querySelectorAll("[data-map-topic-id]").forEach((node) => {
+    const topicId = node.dataset.mapTopicId;
+    const open = () => {
+      if (suppressMapClickId === topicId) return;
+      selectTopic(topicId, true, { collapsePrevious: true });
+    };
+    node.addEventListener("pointerdown", (event) => startMapNodeDrag(event, topicId, node, positions.get(topicId)));
+    node.addEventListener("click", open);
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
+}
+
+function startMapNodeDrag(event, topicId, node, position) {
+  if (event.button !== 0 || !position) return;
+  mapNodeDrag = {
+    topicId,
+    node,
+    orientation: state.settings.mapOrientation || "horizontal",
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startX: position.x,
+    startY: position.y,
+    nextX: position.x,
+    nextY: position.y,
+    moved: false
+  };
+  node.setPointerCapture?.(event.pointerId);
+}
+
+function moveMapNode(event) {
+  if (!mapNodeDrag) return;
+  const dx = (event.clientX - mapNodeDrag.startClientX) / mapZoom;
+  const dy = (event.clientY - mapNodeDrag.startClientY) / mapZoom;
+  if (!mapNodeDrag.moved && Math.hypot(dx, dy) < 4) return;
+  mapNodeDrag.moved = true;
+  mapNodeDrag.nextX = Math.max(8, mapNodeDrag.startX + dx);
+  mapNodeDrag.nextY = Math.max(8, mapNodeDrag.startY + dy);
+  mapNodeDrag.node.classList.add("dragging");
+  mapNodeDrag.node.setAttribute("transform", `translate(${mapNodeDrag.nextX},${mapNodeDrag.nextY})`);
+  event.preventDefault();
+}
+
+function stopMapNodeDrag() {
+  if (!mapNodeDrag) return;
+  const drag = mapNodeDrag;
+  mapNodeDrag = null;
+  drag.node.classList.remove("dragging");
+  if (!drag.moved) return;
+
+  state.mapPositions[drag.orientation] = state.mapPositions[drag.orientation] || {};
+  state.mapPositions[drag.orientation][drag.topicId] = {
+    x: Math.round(drag.nextX),
+    y: Math.round(drag.nextY)
+  };
+  suppressMapClickId = drag.topicId;
+  saveState();
+  renderMap();
+  window.setTimeout(() => {
+    if (suppressMapClickId === drag.topicId) suppressMapClickId = null;
+  }, 0);
+}
+
+function updateMapZoom() {
+  if (!els.areaMap) return;
+  els.areaMap.style.transform = `scale(${mapZoom})`;
+  els.areaMap.style.transformOrigin = "top left";
+}
+
+function truncateMapText(value, length) {
+  const text = String(value || "");
+  return text.length > length ? `${text.slice(0, length - 1)}...` : text;
 }
 
 function renderTasks(tasks, currentTopicId) {
@@ -2656,6 +3220,7 @@ function renderCalendar() {
     openTasks.slice(0, 12).forEach((task) => {
       const item = document.createElement("li");
       item.className = "task-item";
+      item.dataset.taskId = task.id;
       item.innerHTML = `
         <button class="check-button" type="button" aria-label="Complete task"></button>
         <span class="task-text">${escapeHtml(task.text)} <span class="folder-meta">/ ${escapeHtml(topicTitle(task.topicId))}</span></span>
@@ -2720,11 +3285,11 @@ function renderTimeTracker() {
   });
   scheduleEntries.sort((a, b) => a.segment.start - b.segment.start);
 
-  const seasonLabel = state.timeScheduleSeason === "summer" ? "Summer" : "Academic year";
+  els.timeScheduleSeason.innerHTML = state.scheduleSeasons.map((season) => `
+    <button type="button" data-schedule-season="${escapeHtml(season.id)}" class="${season.id === state.timeScheduleSeason ? "active" : ""}">${escapeHtml(season.name)}</button>
+  `).join("");
+  const seasonLabel = seasonName(state.timeScheduleSeason);
   els.idealDayLabel.textContent = `${seasonLabel} / ${weekdayName(state.timeScheduleDay)}`;
-  els.timeScheduleSeason.querySelectorAll("[data-schedule-season]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.scheduleSeason === state.timeScheduleSeason);
-  });
   els.timeScheduleDays.querySelectorAll("[data-schedule-day]").forEach((button) => {
     button.classList.toggle("active", Number(button.dataset.scheduleDay) === state.timeScheduleDay);
   });
@@ -2741,6 +3306,7 @@ function renderSleepRoutine(block) {
   els.sleepStart.value = block?.start || "21:00";
   els.wakeTime.value = block?.end || "07:00";
   els.sleepRoutineClear.hidden = !block;
+  els.sleepTrendOpen.hidden = Boolean(block);
 }
 
 function saveSleepRoutine(event) {
@@ -2866,6 +3432,12 @@ function renderSleepSummary(block) {
   const summary = document.createElement("span");
   summary.textContent = `Sleep ${formatTime(block.start)} - ${formatTime(block.end)}`;
   els.sleepSummary.append(summary);
+  const trends = document.createElement("button");
+  trends.type = "button";
+  trends.className = "sleep-summary-edit";
+  trends.textContent = "View trends";
+  trends.addEventListener("click", openSleepTrendModal);
+  els.sleepSummary.append(trends);
 }
 
 function renderTimeLane(lane, entries, visibleWindow) {

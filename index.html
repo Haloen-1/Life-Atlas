@@ -28,6 +28,7 @@
 
         <nav class="app-nav" aria-label="Main sections">
           <button class="app-nav-item active" type="button" data-app-view="life">Life</button>
+          <button class="app-nav-item" type="button" data-app-view="map">Map</button>
           <button class="app-nav-item" type="button" data-app-view="brain">Blabber</button>
           <button class="app-nav-item" type="button" data-app-view="calendar">Calendar</button>
           <button class="app-nav-item" type="button" data-app-view="time">Schedule</button>
@@ -56,9 +57,6 @@
             <button class="ghost-button danger" id="deleteTopic" type="button">
               Delete
             </button>
-            <button class="ghost-button" id="enableNotifications" type="button">
-              Enable alerts
-            </button>
             <button class="ghost-button" id="showNextExam" type="button" hidden>
               Show event tile
             </button>
@@ -75,15 +73,21 @@
         </header>
 
         <section class="overview-grid" aria-label="Life overview">
-          <article class="metric">
-            <span class="metric-label">Open tasks</span>
-            <strong id="openTaskCount">0</strong>
-          </article>
-          <article class="metric">
+          <article class="metric metric-area">
             <span class="metric-label">Areas</span>
             <strong id="topicCount">0</strong>
           </article>
-          <article class="metric" id="nextExamMetric">
+          <article class="metric metric-notes">
+            <span class="metric-label">Notes</span>
+            <strong id="noteCount">0</strong>
+            <small class="metric-detail" id="noteMetricDetail">Across your atlas</small>
+          </article>
+          <article class="metric metric-action">
+            <span class="metric-label">Open tasks</span>
+            <strong id="openTaskCount">0</strong>
+            <small class="metric-detail">Small steps in motion</small>
+          </article>
+          <article class="metric metric-event" id="nextExamMetric">
             <button class="metric-dismiss" id="hideNextExam" type="button" aria-label="Hide next event">x</button>
             <span class="metric-label">Next event</span>
             <strong id="nextExam">None</strong>
@@ -108,6 +112,36 @@
               </div>
             </div>
             <div class="folder-grid" id="childTopics"></div>
+          </section>
+
+          <section class="panel map-panel">
+            <div class="panel-heading map-heading">
+              <div>
+                <p class="eyebrow">See the shape of your life</p>
+                <h3>Area map</h3>
+              </div>
+              <div class="map-actions">
+                <div class="segmented compact map-orientation" id="mapOrientation" aria-label="Map direction">
+                  <button class="active" type="button" data-map-orientation="horizontal">Horizontal</button>
+                  <button type="button" data-map-orientation="vertical">Vertical</button>
+                </div>
+                <label class="map-toggle">
+                  <input id="mapShowNotes" type="checkbox" checked />
+                  <span>Notes</span>
+                </label>
+                <button class="icon-button quiet" id="mapZoomOut" type="button" aria-label="Zoom out">-</button>
+                <button class="icon-button quiet" id="mapZoomIn" type="button" aria-label="Zoom in">+</button>
+                <button class="ghost-button compact" id="mapReset" type="button">Reset</button>
+              </div>
+            </div>
+            <div class="map-legend" aria-label="Map legend">
+              <span><i class="legend-dot area"></i>Area</span>
+              <span><i class="legend-dot note"></i>Has notes</span>
+              <span class="map-hint">Drag to arrange, select to open</span>
+            </div>
+            <div class="map-viewport" id="mapViewport" tabindex="0" aria-label="Life area map">
+              <svg class="area-map" id="areaMap" role="img" aria-label="Connected map of life areas"></svg>
+            </div>
           </section>
 
           <section class="panel task-panel priority-panel" draggable="true" data-focus-panel="tasks">
@@ -429,6 +463,87 @@
         </section>
       </main>
     </div>
+
+    <button class="studio-launcher" id="studioLauncher" type="button" aria-expanded="false" aria-controls="studioDrawer">
+      <span class="studio-launcher-mark" aria-hidden="true"></span>
+      <span>Workspace</span>
+    </button>
+
+    <aside class="studio-drawer" id="studioDrawer" aria-label="Workspace controls" aria-hidden="true" hidden>
+      <div class="studio-drawer-head">
+        <div>
+          <p class="eyebrow">Workspace</p>
+          <h2>Make it yours</h2>
+        </div>
+        <button class="studio-close" id="studioClose" type="button" aria-label="Close workspace">x</button>
+      </div>
+      <nav class="studio-tabs" id="studioTabs" aria-label="Workspace controls">
+        <button class="studio-tab active" type="button" data-studio-tab="focus">Focus</button>
+        <button class="studio-tab" type="button" data-studio-tab="history">History</button>
+        <button class="studio-tab" type="button" data-studio-tab="settings">Settings</button>
+      </nav>
+      <section class="studio-pane active" data-studio-pane="focus">
+        <div class="studio-focus-card">
+          <span class="studio-kicker">Today's momentum</span>
+          <strong id="studioProgressTitle">Start with one small step</strong>
+          <div class="studio-progress-track"><span id="studioProgressBar"></span></div>
+          <p id="studioProgressCopy">A short list is still a list. Keep the next action visible.</p>
+        </div>
+        <div class="studio-quick-actions">
+          <button type="button" data-studio-action="task">New task</button>
+          <button type="button" data-studio-action="area">New area</button>
+          <button type="button" data-studio-action="export">Backup</button>
+        </div>
+      </section>
+      <section class="studio-pane" data-studio-pane="history" hidden>
+        <div class="studio-pane-heading">
+          <div>
+            <span class="studio-kicker">Proof of progress</span>
+            <h3>Recently completed</h3>
+          </div>
+          <span class="studio-count" id="historyCount">0</span>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+      <section class="studio-pane" data-studio-pane="settings" hidden>
+        <div class="studio-pane-heading">
+          <div>
+            <span class="studio-kicker">Personal settings</span>
+            <h3>Shape the room</h3>
+          </div>
+        </div>
+        <label class="studio-setting-row">
+          <span><strong>Color mood</strong><small>Choose the atmosphere for your atlas.</small></span>
+          <select id="appThemeSelect" aria-label="Color mood">
+            <option value="sage">Sage / paper</option>
+            <option value="blue">Quiet blue</option>
+            <option value="plum">Soft plum</option>
+            <option value="night">Night mode</option>
+          </select>
+        </label>
+        <label class="studio-setting-row">
+          <span><strong>Gentle motion</strong><small>Use soft transitions when completing tasks.</small></span>
+          <input id="motionToggle" type="checkbox" checked />
+        </label>
+        <div class="studio-setting-block">
+          <div class="studio-setting-title"><strong>Visible sections</strong><small>Keep only the tools you actually use.</small></div>
+          <div class="section-visibility" id="sectionVisibility"></div>
+        </div>
+        <div class="studio-setting-block">
+          <div class="studio-setting-title"><strong>Seasons</strong><small>Use your own schedule names.</small></div>
+          <div class="season-manager" id="seasonManager"></div>
+          <form class="season-add-form" id="seasonAddForm">
+            <input id="seasonNameInput" type="text" placeholder="New season" autocomplete="off" />
+            <button type="submit" aria-label="Add season">+</button>
+          </form>
+        </div>
+        <div class="studio-setting-actions">
+          <button type="button" data-studio-action="import">Import data</button>
+          <button type="button" data-studio-action="export">Export data</button>
+          <button type="button" data-studio-action="notifications">Enable alerts</button>
+        </div>
+      </section>
+    </aside>
 
     <div class="modal-backdrop" id="folderModal" hidden>
       <form class="modal draggable-modal" id="folderForm">
