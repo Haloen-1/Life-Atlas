@@ -115,9 +115,8 @@ let sleepTrendRange = "week";
 let scheduleUndoStack = [];
 let studioTab = "focus";
 let pendingTaskAnimations = new Set();
-let mapZoom = 1;
-let mapNodeDrag = null;
-let suppressMapClickId = null;
+let areaMapController = null;
+let habitDraftDays = [0, 1, 2, 3, 4, 5, 6];
 let folderModalCloseTimer = null;
 let lastRenderedViewKey = null;
 
@@ -366,6 +365,18 @@ els.showNextExam.addEventListener("click", () => {
 els.examForm.addEventListener("submit", addExam);
 els.habitForm.addEventListener("submit", addHabit);
 els.habitDate.addEventListener("change", () => renderHabits());
+document.querySelector("#habitRepeatDays").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-habit-day]");
+  if (!button) return;
+  const day = Number(button.dataset.habitDay);
+  if (habitDraftDays.includes(day) && habitDraftDays.length === 1) {
+    showToast("Choose at least one day.");
+    return;
+  }
+  habitDraftDays = habitDraftDays.includes(day)
+    ? habitDraftDays.filter((item) => item !== day) : [...habitDraftDays, day].sort();
+  button.setAttribute("aria-pressed", String(habitDraftDays.includes(day)));
+});
 els.financeForm.addEventListener("submit", addFinanceTransaction);
 els.sleepRoutineForm.addEventListener("submit", saveSleepRoutine);
 els.sleepRoutineClear.addEventListener("click", clearSleepRoutine);
@@ -539,28 +550,27 @@ els.mapOrientation.addEventListener("click", (event) => {
   const button = event.target.closest("[data-map-orientation]");
   if (!button) return;
   state.settings.mapOrientation = button.dataset.mapOrientation;
-  mapZoom = 1;
   saveState();
   renderMap();
 });
 els.mapZoomOut.addEventListener("click", () => {
-  mapZoom = Math.max(0.65, Number((mapZoom - 0.15).toFixed(2)));
-  updateMapZoom();
+  areaMapController?.scaleBy(1 / 1.25);
 });
 els.mapZoomIn.addEventListener("click", () => {
-  mapZoom = Math.min(1.8, Number((mapZoom + 0.15).toFixed(2)));
-  updateMapZoom();
+  areaMapController?.scaleBy(1.25);
 });
+document.querySelector("#mapFit").addEventListener("click", () => areaMapController?.fit());
 els.mapReset.addEventListener("click", () => {
-  mapZoom = 1;
   state.mapPositions[state.settings.mapOrientation] = {};
+  areaMapController?.reset();
   saveState();
   renderMap();
-  updateMapZoom();
-  els.mapViewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
 });
-window.addEventListener("pointermove", moveMapNode);
-window.addEventListener("pointerup", stopMapNodeDrag);
+setupWorkspaceResize(els.studioDrawer, document.querySelector("#workspaceResize"),
+  () => state.settings.workspaceSize,
+  (size) => { state.settings.workspaceSize = size; saveState(); });
+setupPointerReordering();
+setupCustomSelects();
 
 function setupPriorityPanelDrag() {
   [
@@ -568,11 +578,11 @@ function setupPriorityPanelDrag() {
     { panel: els.notesPanel, name: "notes" }
   ].forEach(({ panel, name }) => {
     panel.addEventListener("dragstart", (event) => {
+      if (event.target.closest(".task-item")) return;
       if (state.appView !== "life" || els.contentGrid.classList.contains("subject-mode")) {
         event.preventDefault();
         return;
       }
-      if (event.target.closest(".task-item")) return;
       if (event.target.closest("input, textarea, button, select, form, .notes-editor, .notes-toolbar")) {
         event.preventDefault();
         return;
@@ -622,6 +632,7 @@ function clearPriorityDropTargets(exceptPanel) {
 
 function toggleStudioDrawer(open) {
   if (open) {
+    closeAtlasSelect();
     els.studioDrawer.hidden = false;
     els.studioDrawer.setAttribute("aria-hidden", "false");
     els.studioLauncher.setAttribute("aria-expanded", "true");
@@ -658,6 +669,7 @@ function applyAppSettings() {
   els.appThemeSelect.value = settings.theme || "sage";
   els.motionToggle.checked = settings.gentleMotion !== false;
   els.mapShowNotes.checked = settings.mapShowNotes !== false;
+  syncAtlasSelects();
   OPTIONAL_SECTIONS.forEach((section) => {
     const navButton = els.appNav.querySelector(`[data-app-view="${section.id}"]`);
     if (navButton) navButton.hidden = settings.visibleSections?.[section.id] === false;
@@ -1108,6 +1120,7 @@ function ensureStateShape() {
   if (!Array.isArray(state.habits)) state.habits = [];
   state.habits.forEach((habit) => {
     if (!Array.isArray(habit.completedDates)) habit.completedDates = [];
+    habit.days = normalizeHabitDays(habit.days);
     if (!habit.createdAt) habit.createdAt = Date.now();
     if (typeof habit.order !== "number") habit.order = habit.createdAt || Date.now();
   });
@@ -1240,8 +1253,8 @@ function reorderTopic(draggedId, targetId) {
   if (!dragged || !target || dragged.parentId !== target.parentId) return;
 
   const siblings = childrenOf(dragged.parentId);
+  const targetIndex = siblings.findIndex((topic) => topic.id === targetId);
   const withoutDragged = siblings.filter((topic) => topic.id !== draggedId);
-  const targetIndex = withoutDragged.findIndex((topic) => topic.id === targetId);
   withoutDragged.splice(targetIndex, 0, dragged);
   withoutDragged.forEach((topic, index) => {
     topic.order = index + 1;
@@ -1534,6 +1547,7 @@ function updateFolderColorPreview() {
   const option = els.folderColorInput.selectedOptions[0];
   els.folderColorSwatch.style.background = selectedFolderColor();
   els.folderColorName.textContent = option?.textContent || "Sage";
+  syncAtlasSelects();
 }
 
 function selectedFolderColor() {
@@ -1725,8 +1739,8 @@ function reorderTask(draggedId, targetId) {
   const siblings = state.tasks
     .filter((task) => task.topicId === dragged.topicId)
     .sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt));
+  const targetIndex = siblings.findIndex((task) => task.id === targetId);
   const withoutDragged = siblings.filter((task) => task.id !== draggedId);
-  const targetIndex = withoutDragged.findIndex((task) => task.id === targetId);
   withoutDragged.splice(targetIndex, 0, dragged);
   withoutDragged.forEach((task, index) => {
     task.order = index + 1;
@@ -1782,11 +1796,14 @@ function addHabit(event) {
     id: createId(),
     name,
     completedDates: [],
+    days: [...habitDraftDays],
     order: nextHabitOrder(),
     createdAt: Date.now()
   });
 
   els.habitInput.value = "";
+  habitDraftDays = [0, 1, 2, 3, 4, 5, 6];
+  document.querySelectorAll("[data-habit-day]").forEach((button) => button.setAttribute("aria-pressed", "true"));
   saveState();
   render();
 }
@@ -1800,6 +1817,7 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
   if (!habit) return;
 
   habit.completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
+  if (!isHabitScheduled(habit, key) && !habit.completedDates.includes(key)) return;
   if (habit.completedDates.includes(key)) {
     habit.completedDates = habit.completedDates.filter((date) => date !== key);
   } else {
@@ -2510,6 +2528,7 @@ function render() {
   renderTimeTracker();
   renderBrainBoard();
   renderStudio();
+  syncAtlasSelects();
   animateViewChange(`${appView}:${topic.id}:${view}`);
 }
 
@@ -2585,6 +2604,7 @@ function renderTreeBranch(topicId, depth) {
   item.dataset.topicId = topic.id;
   item.draggable = topic.id !== "root";
   item.addEventListener("dragstart", (event) => {
+    event.stopPropagation();
     if (topic.id === "root" || event.target.closest("button") !== button) {
       event.preventDefault();
       return;
@@ -2600,6 +2620,7 @@ function renderTreeBranch(topicId, depth) {
     clearSidebarDropStates();
   });
   item.addEventListener("dragover", (event) => {
+    event.stopPropagation();
     if (!sidebarDraggedTopicId || sidebarDraggedTopicId === topic.id) return;
     event.preventDefault();
     clearSidebarDropStates();
@@ -2609,6 +2630,7 @@ function renderTreeBranch(topicId, depth) {
     item.classList.add(`drop-${sidebarDropMode}`);
   });
   item.addEventListener("drop", (event) => {
+    event.stopPropagation();
     event.preventDefault();
     const draggedId = sidebarDraggedTopicId || event.dataTransfer.getData("text/plain");
     clearSidebarDropStates();
@@ -2727,186 +2749,29 @@ function renderChildren(topicId) {
 }
 
 function renderMap() {
-  if (!els.areaMap) return;
-  const topics = state.topics.filter((topic) => topic && topic.id);
-  const byId = new Map(topics.map((topic) => [topic.id, topic]));
-  const depths = new Map();
-
-  function depthFor(topic, trail = new Set()) {
-    if (depths.has(topic.id)) return depths.get(topic.id);
-    if (trail.has(topic.id) || !topic.parentId || !byId.has(topic.parentId)) {
-      depths.set(topic.id, 0);
-      return 0;
-    }
-    const nextTrail = new Set(trail);
-    nextTrail.add(topic.id);
-    const depth = depthFor(byId.get(topic.parentId), nextTrail) + 1;
-    depths.set(topic.id, depth);
-    return depth;
-  }
-
-  topics.forEach((topic) => depthFor(topic));
-  const levels = [];
-  topics.forEach((topic) => {
-    const depth = depths.get(topic.id) || 0;
-    if (!levels[depth]) levels[depth] = [];
-    levels[depth].push(topic);
-  });
-  levels.forEach((level) => level.sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt)));
-
-  const orientation = state.settings.mapOrientation || "horizontal";
-  const nodeWidth = 198;
-  const nodeHeight = 78;
-  const layerGap = 68;
-  const itemGap = 28;
-  const largestLevel = Math.max(...levels.map((level) => level.length), 1);
-  const width = orientation === "horizontal"
-    ? Math.max(940, levels.length * (nodeWidth + layerGap) + 80)
-    : Math.max(940, largestLevel * (nodeWidth + itemGap) + 100);
-  const height = orientation === "horizontal"
-    ? Math.max(540, largestLevel * (nodeHeight + itemGap) + 110)
-    : Math.max(540, levels.length * (nodeHeight + layerGap) + 90);
-  const positions = new Map();
-
-  levels.forEach((level, depth) => {
-    if (orientation === "horizontal") {
-      const x = 40 + depth * (nodeWidth + layerGap);
-      const gap = nodeHeight + itemGap;
-      const columnHeight = level.length * gap - itemGap;
-      const startY = Math.max(28, (height - columnHeight) / 2);
-      level.forEach((topic, index) => positions.set(topic.id, { x, y: startY + index * gap }));
-      return;
-    }
-
-    const y = 36 + depth * (nodeHeight + layerGap);
-    const gap = nodeWidth + itemGap;
-    const rowWidth = level.length * gap - itemGap;
-    const startX = Math.max(40, (width - rowWidth) / 2);
-    level.forEach((topic, index) => positions.set(topic.id, { x: startX + index * gap, y }));
-  });
-
-  const savedPositions = state.mapPositions?.[orientation] || {};
-  topics.forEach((topic) => {
-    const saved = savedPositions[topic.id];
-    if (!saved || !Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return;
-    positions.set(topic.id, { x: Math.max(8, saved.x), y: Math.max(8, saved.y) });
-  });
-
-  const hasNotes = (topic) => Boolean(stripHtml(topic.notes).trim());
-  const showNotes = state.settings.mapShowNotes !== false;
-  const edges = topics.filter((topic) => topic.parentId && positions.has(topic.parentId)).map((topic) => {
-    const parent = positions.get(topic.parentId);
-    const child = positions.get(topic.id);
-    if (orientation === "vertical") {
-      const startY = parent.y + nodeHeight;
-      const endY = child.y;
-      const centerX = parent.x + nodeWidth / 2;
-      const childX = child.x + nodeWidth / 2;
-      const curve = Math.max(30, Math.abs(endY - startY) * 0.52);
-      return `<path class="map-edge" d="M ${centerX} ${startY} C ${centerX} ${startY + curve}, ${childX} ${endY - curve}, ${childX} ${endY}" />`;
-    }
-    const startX = parent.x + nodeWidth;
-    const endX = child.x;
-    const curve = Math.max(30, (endX - startX) * 0.52);
-    return `<path class="map-edge" d="M ${startX} ${parent.y + nodeHeight / 2} C ${startX + curve} ${parent.y + nodeHeight / 2}, ${endX - curve} ${child.y + nodeHeight / 2}, ${endX} ${child.y + nodeHeight / 2}" />`;
-  }).join("");
-
-  const nodes = topics.map((topic) => {
-    const position = positions.get(topic.id);
-    const note = stripHtml(topic.notes).trim();
-    const title = truncateMapText(topic.title, 23);
-    const noteText = showNotes ? truncateMapText(note || "No note yet", 28) : "";
-    const selected = topic.id === state.selectedTopicId;
-    return `
-      <g class="map-node${selected ? " selected" : ""}${hasNotes(topic) ? " has-note" : ""}" data-map-topic-id="${escapeHtml(topic.id)}" transform="translate(${position.x},${position.y})" tabindex="0" role="button" aria-label="Open ${escapeHtml(topic.title)}">
-        <rect class="map-node-body" width="${nodeWidth}" height="${nodeHeight}" rx="14"></rect>
-        <circle class="map-node-dot" cx="20" cy="20" r="8" fill="${escapeHtml(topic.color || "#4f6f52")}"></circle>
-        <text class="map-node-title" x="36" y="25">${escapeHtml(title)}</text>
-        ${showNotes ? `<text class="map-node-note" x="18" y="51">${escapeHtml(noteText)}</text>` : ""}
-        ${hasNotes(topic) ? `<circle class="map-note-mark" cx="177" cy="19" r="4"></circle>` : ""}
-      </g>
-    `;
-  }).join("");
-
-  els.areaMap.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  els.areaMap.setAttribute("width", width);
-  els.areaMap.setAttribute("height", height);
-  els.areaMap.innerHTML = `<g class="map-layer">${edges}${nodes}</g>`;
-  updateMapZoom();
-  els.mapOrientation.querySelectorAll("[data-map-orientation]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mapOrientation === orientation);
-  });
-  els.areaMap.querySelectorAll("[data-map-topic-id]").forEach((node) => {
-    const topicId = node.dataset.mapTopicId;
-    const open = () => {
-      if (suppressMapClickId === topicId) return;
-      selectTopic(topicId, true, { collapsePrevious: true });
-    };
-    node.addEventListener("pointerdown", (event) => startMapNodeDrag(event, topicId, node, positions.get(topicId)));
-    node.addEventListener("click", open);
-    node.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        open();
+  if (!areaMapController) {
+    areaMapController = createAreaMap(els.areaMap, {
+      motion: () => state.settings.gentleMotion !== false,
+      onOpen: (id) => selectTopic(id, true, { collapsePrevious: true }),
+      onMove: (id, position) => {
+        state.mapPositions[state.settings.mapOrientation][id] = position;
+        saveState();
       }
     });
+  }
+  els.mapOrientation.querySelectorAll("[data-map-orientation]").forEach((button) => {
+    const active = button.dataset.mapOrientation === state.settings.mapOrientation;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
-}
-
-function startMapNodeDrag(event, topicId, node, position) {
-  if (event.button !== 0 || !position) return;
-  mapNodeDrag = {
-    topicId,
-    node,
-    orientation: state.settings.mapOrientation || "horizontal",
-    startClientX: event.clientX,
-    startClientY: event.clientY,
-    startX: position.x,
-    startY: position.y,
-    nextX: position.x,
-    nextY: position.y,
-    moved: false
-  };
-  node.setPointerCapture?.(event.pointerId);
-}
-
-function moveMapNode(event) {
-  if (!mapNodeDrag) return;
-  const dx = (event.clientX - mapNodeDrag.startClientX) / mapZoom;
-  const dy = (event.clientY - mapNodeDrag.startClientY) / mapZoom;
-  if (!mapNodeDrag.moved && Math.hypot(dx, dy) < 4) return;
-  mapNodeDrag.moved = true;
-  mapNodeDrag.nextX = Math.max(8, mapNodeDrag.startX + dx);
-  mapNodeDrag.nextY = Math.max(8, mapNodeDrag.startY + dy);
-  mapNodeDrag.node.classList.add("dragging");
-  mapNodeDrag.node.setAttribute("transform", `translate(${mapNodeDrag.nextX},${mapNodeDrag.nextY})`);
-  event.preventDefault();
-}
-
-function stopMapNodeDrag() {
-  if (!mapNodeDrag) return;
-  const drag = mapNodeDrag;
-  mapNodeDrag = null;
-  drag.node.classList.remove("dragging");
-  if (!drag.moved) return;
-
-  state.mapPositions[drag.orientation] = state.mapPositions[drag.orientation] || {};
-  state.mapPositions[drag.orientation][drag.topicId] = {
-    x: Math.round(drag.nextX),
-    y: Math.round(drag.nextY)
-  };
-  suppressMapClickId = drag.topicId;
-  saveState();
-  renderMap();
-  window.setTimeout(() => {
-    if (suppressMapClickId === drag.topicId) suppressMapClickId = null;
-  }, 0);
-}
-
-function updateMapZoom() {
-  if (!els.areaMap) return;
-  els.areaMap.style.transform = `scale(${mapZoom})`;
-  els.areaMap.style.transformOrigin = "top left";
+  areaMapController.update({
+    active: state.appView === "map",
+    topics: state.topics.map((topic) => ({ ...topic, note: stripHtml(topic.notes).trim() })),
+    orientation: state.settings.mapOrientation,
+    positions: state.mapPositions[state.settings.mapOrientation],
+    showNotes: state.settings.mapShowNotes,
+    selectedId: state.selectedTopicId
+  });
 }
 
 function truncateMapText(value, length) {
@@ -3046,19 +2911,21 @@ function renderHabits() {
   orderedHabits.forEach((habit, index) => {
     const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
     const done = completedDates.includes(selectedDate);
-    const currentStreak = habitStreak(completedDates);
-    const bestStreak = bestHabitStreak(completedDates);
+    const scheduled = isHabitScheduled(habit, selectedDate);
+    const currentStreak = habitStreak(habit);
+    const bestStreak = bestHabitStreak(habit);
     const card = document.createElement("article");
-    card.className = `habit-card${done ? " done" : ""}`;
+    card.className = `habit-card${done ? " done" : ""}${!scheduled ? " rest-day" : ""}`;
     card.draggable = true;
     card.dataset.habitId = habit.id;
     card.innerHTML = `
       <div>
         <strong>${escapeHtml(habit.name)}</strong>
-        <span>${done ? `Done ${selectedLabel}` : `Not marked ${selectedLabel}`} / Current ${currentStreak} / Best ${bestStreak}</span>
+        <span>${done ? `Done ${selectedLabel}` : scheduled ? `Not marked ${selectedLabel}` : "Day off"} / Current ${currentStreak} / Best ${bestStreak}</span>
+        <small class="habit-schedule-label">${habitScheduleLabel(habit)}</small>
       </div>
       <div class="row-actions">
-        <button type="button" data-action="toggle">${done ? "Done" : "Check"}</button>
+        <button type="button" data-action="toggle" ${!scheduled && !done ? "disabled" : ""}>${done ? "Done" : scheduled ? "Check" : "Day off"}</button>
         <button type="button" data-action="delete">x</button>
       </div>
     `;
@@ -3745,7 +3612,9 @@ function isSleepBoundary(block) {
 
 function renderTimeBlockRepeatDays() {
   els.timeBlockRepeatDays.querySelectorAll("[data-repeat-day]").forEach((button) => {
-    button.classList.toggle("active", timeBlockDraftDays.includes(Number(button.dataset.repeatDay)));
+    const active = timeBlockDraftDays.includes(Number(button.dataset.repeatDay));
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
 }
 
@@ -3753,6 +3622,7 @@ function updateTimeBlockEndVisibility() {
   const instant = els.timeBlockCategory.value === "food";
   els.timeBlockEndLabel.hidden = instant;
   els.timeBlockEnd.required = !instant;
+  syncAtlasSelects();
 }
 
 function timeBlockSegments(block) {
@@ -4121,42 +3991,58 @@ function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function habitStreak(completedDates) {
-  const set = new Set(completedDates);
-  let streak = 0;
-  const cursor = new Date(`${todayKey()}T00:00`);
+function normalizeHabitDays(days) {
+  const valid = Array.isArray(days) ? [...new Set(days.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort() : [];
+  return valid.length ? valid : [0, 1, 2, 3, 4, 5, 6];
+}
 
-  while (set.has(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`)) {
-    streak += 1;
+function isHabitScheduled(habit, key) {
+  return normalizeHabitDays(habit.days).includes(new Date(`${key}T12:00:00`).getDay());
+}
+
+function habitScheduleLabel(habit) {
+  const days = normalizeHabitDays(habit.days);
+  if (days.length === 7) return "Every day";
+  return days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
+}
+
+function previousHabitDate(habit, key) {
+  const cursor = new Date(`${key}T12:00:00`);
+  for (let i = 0; i < 7; i += 1) {
     cursor.setDate(cursor.getDate() - 1);
+    if (isHabitScheduled(habit, dateKey(cursor))) return dateKey(cursor);
   }
+}
 
+function habitStreak(habit) {
+  const completed = new Set(habit.completedDates || []);
+  let cursor = todayKey();
+  // Today's scheduled occurrence stays open until the day ends.
+  if (!isHabitScheduled(habit, cursor) || !completed.has(cursor)) cursor = previousHabitDate(habit, cursor);
+  let streak = 0;
+  while (completed.has(cursor)) {
+    streak += 1;
+    cursor = previousHabitDate(habit, cursor);
+  }
   return streak;
 }
 
-function bestHabitStreak(completedDates) {
-  const dates = [...new Set(completedDates)].sort();
+function bestHabitStreak(habit) {
+  const dates = [...new Set(habit.completedDates || [])].filter((key) => key <= todayKey() && isHabitScheduled(habit, key)).sort();
   let best = 0;
   let current = 0;
   let previous = null;
-
   dates.forEach((key) => {
-    if (previous && daysBetween(previous, key) === 1) {
-      current += 1;
-    } else {
-      current = 1;
-    }
+    current = previous === previousHabitDate(habit, key) ? current + 1 : 1;
     best = Math.max(best, current);
     previous = key;
   });
-
   return best;
 }
 
 function isHabitMissedOnDate(habit, key) {
-  if (key >= todayKey()) return false;
-  if (!habitStartedByDate(habit, key)) return false;
-  return !new Set(habit.completedDates || []).has(key);
+  if (key >= todayKey() || !habitStartedByDate(habit, key) || !isHabitScheduled(habit, key)) return false;
+  return !(habit.completedDates || []).includes(key);
 }
 
 function habitStartedByDate(habit, key) {

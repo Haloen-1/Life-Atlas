@@ -10,3 +10,4 @@ desktop.ini
 # Private exports and local code rollback archives
 life-atlas-backup-*.json
 Life-Atlas-code-*.zip
+test-artifacts/

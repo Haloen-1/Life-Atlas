@@ -10,6 +10,7 @@
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="icon.svg" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="controls.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -131,13 +132,13 @@
                 </label>
                 <button class="icon-button quiet" id="mapZoomOut" type="button" aria-label="Zoom out">-</button>
                 <button class="icon-button quiet" id="mapZoomIn" type="button" aria-label="Zoom in">+</button>
+                <button class="ghost-button compact" id="mapFit" type="button">Fit</button>
                 <button class="ghost-button compact" id="mapReset" type="button">Reset</button>
               </div>
             </div>
             <div class="map-legend" aria-label="Map legend">
               <span><i class="legend-dot area"></i>Area</span>
               <span><i class="legend-dot note"></i>Has notes</span>
-              <span class="map-hint">Drag to arrange, select to open</span>
             </div>
             <div class="map-viewport" id="mapViewport" tabindex="0" aria-label="Life area map">
               <svg class="area-map" id="areaMap" role="img" aria-label="Connected map of life areas"></svg>
@@ -423,6 +424,18 @@
               <span class="habit-new-label">New habit</span>
               <input id="habitInput" type="text" placeholder="Small daily rhythm" autocomplete="off" />
               <button type="submit">Add</button>
+              <fieldset class="habit-repeat">
+                <legend>Repeat on</legend>
+                <div class="weekday-picker" id="habitRepeatDays">
+                  <button type="button" data-habit-day="0" aria-label="Sunday" aria-pressed="true">Sun</button>
+                  <button type="button" data-habit-day="1" aria-label="Monday" aria-pressed="true">Mon</button>
+                  <button type="button" data-habit-day="2" aria-label="Tuesday" aria-pressed="true">Tue</button>
+                  <button type="button" data-habit-day="3" aria-label="Wednesday" aria-pressed="true">Wed</button>
+                  <button type="button" data-habit-day="4" aria-label="Thursday" aria-pressed="true">Thu</button>
+                  <button type="button" data-habit-day="5" aria-label="Friday" aria-pressed="true">Fri</button>
+                  <button type="button" data-habit-day="6" aria-label="Saturday" aria-pressed="true">Sat</button>
+                </div>
+              </fieldset>
             </form>
           </section>
 
@@ -470,6 +483,7 @@
     </button>
 
     <aside class="studio-drawer" id="studioDrawer" aria-label="Workspace controls" aria-hidden="true" hidden>
+      <button class="workspace-resize" id="workspaceResize" type="button" aria-label="Resize workspace" title="Resize workspace"></button>
       <div class="studio-drawer-head">
         <div>
           <p class="eyebrow">Workspace</p>
@@ -628,6 +642,9 @@
     <div class="celebration" id="celebration" aria-hidden="true"></div>
     <input id="importDataFile" type="file" accept=".json,application/json" hidden />
 
+    <script src="vendor/d3.v7.min.js"></script>
+    <script src="area-map.js"></script>
+    <script src="controls.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -1,9 +1,13 @@
-const CACHE_NAME = "life-atlas-v2";
+const CACHE_NAME = "life-atlas-v3-controls";
 const APP_FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./controls.js",
+  "./controls.css",
+  "./area-map.js",
+  "./vendor/d3.v7.min.js",
   "./manifest.json",
   "./icon.svg"
 ];
