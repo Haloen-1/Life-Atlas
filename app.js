@@ -66,6 +66,7 @@ const defaultState = {
     gentleMotion: true,
     mapShowNotes: true,
     mapOrientation: "horizontal",
+    areaTabOrder: ["topics", "homework", "notes"],
     visibleSections: {
       map: true,
       brain: true,
@@ -279,6 +280,7 @@ const els = {
   historyCount: document.querySelector("#historyCount"),
   historyList: document.querySelector("#historyList"),
   appThemeSelect: document.querySelector("#appThemeSelect"),
+  areaTabOrderSelect: document.querySelector("#areaTabOrderSelect"),
   sectionVisibility: document.querySelector("#sectionVisibility"),
   motionToggle: document.querySelector("#motionToggle"),
   seasonManager: document.querySelector("#seasonManager"),
@@ -494,6 +496,13 @@ els.studioLauncher.addEventListener("click", () => {
   const isOpen = els.studioLauncher.getAttribute("aria-expanded") === "true";
   toggleStudioDrawer(!isOpen);
 });
+const compactWorkspace = window.matchMedia("(max-width: 820px)");
+function positionWorkspaceLauncher() {
+  document.querySelector(compactWorkspace.matches ? "#workspaceMobileSlot" : "#workspaceDesktopSlot")
+    .append(els.studioLauncher);
+}
+compactWorkspace.addEventListener("change", positionWorkspaceLauncher);
+positionWorkspaceLauncher();
 els.studioClose.addEventListener("click", () => toggleStudioDrawer(false));
 els.studioTabs.addEventListener("click", (event) => {
   const button = event.target.closest("[data-studio-tab]");
@@ -522,6 +531,11 @@ els.studioDrawer.addEventListener("click", (event) => {
 });
 els.appThemeSelect.addEventListener("change", () => {
   state.settings.theme = els.appThemeSelect.value;
+  saveState();
+  applyAppSettings();
+});
+els.areaTabOrderSelect.addEventListener("change", () => {
+  state.settings.areaTabOrder = els.areaTabOrderSelect.value.split(",");
   saveState();
   applyAppSettings();
 });
@@ -667,6 +681,9 @@ function applyAppSettings() {
   document.body.dataset.theme = settings.theme || "sage";
   document.body.classList.toggle("reduced-motion", !settings.gentleMotion);
   els.appThemeSelect.value = settings.theme || "sage";
+  const tabOrder = settings.areaTabOrder || defaultState.settings.areaTabOrder;
+  els.areaTabOrderSelect.value = tabOrder.join(",");
+  tabOrder.forEach((view) => els.subjectTabs.append(els.subjectTabs.querySelector(`[data-view="${view}"]`)));
   els.motionToggle.checked = settings.gentleMotion !== false;
   els.mapShowNotes.checked = settings.mapShowNotes !== false;
   syncAtlasSelects();
@@ -1179,6 +1196,9 @@ function ensureStateShape() {
   state.settings.gentleMotion = state.settings.gentleMotion !== false;
   state.settings.mapShowNotes = state.settings.mapShowNotes !== false;
   if (!["horizontal", "vertical"].includes(state.settings.mapOrientation)) state.settings.mapOrientation = "horizontal";
+  const savedTabOrder = Array.isArray(state.settings.areaTabOrder) ? state.settings.areaTabOrder : [];
+  state.settings.areaTabOrder = [...new Set([...savedTabOrder, ...defaultState.settings.areaTabOrder])]
+    .filter((view) => defaultState.settings.areaTabOrder.includes(view));
   if (!state.settings.visibleSections || typeof state.settings.visibleSections !== "object") {
     state.settings.visibleSections = clone(defaultState.settings.visibleSections);
     if (state.settings.showBlabber === false) state.settings.visibleSections.brain = false;
@@ -1226,7 +1246,7 @@ function ensureStateShape() {
     if (!block.end) block.end = "09:00";
   });
   state.topics.forEach((topic) => {
-    if (!("view" in topic)) topic.view = "homework";
+    if (!["topics", "homework", "notes"].includes(topic.view)) topic.view = "topics";
     if (!topic.icon) topic.icon = initials(topic.title);
     if (!topic.color) topic.color = "#4f6f52";
     if (!["tasks", "notes"].includes(topic.focusPanel)) topic.focusPanel = "tasks";
@@ -1395,11 +1415,15 @@ function descendantIds(topicId) {
 }
 
 function selectTopic(topicId, remember = true, options = {}) {
-  if (state.selectedTopicId === topicId && state.appView === "life") return;
-  if (remember) pushHistory();
+  const topic = state.topics.find((item) => item.id === topicId);
+  if (!topic) return;
+  const sameArea = state.selectedTopicId === topicId && state.appView === "life";
+  if (sameArea && topic.view === "topics") return;
+  if (remember && !sameArea) pushHistory();
   const previousTopicId = state.selectedTopicId;
   state.appView = "life";
   state.selectedTopicId = topicId;
+  topic.view = "topics";
   if (options.collapsePrevious && previousTopicId !== "root" && childrenOf(previousTopicId).length && !isCollapsed(previousTopicId)) {
     state.collapsedTopicIds.push(previousTopicId);
   }
@@ -1411,6 +1435,7 @@ function openAppView(appView) {
   if (!appView || appView === state.appView) return;
   pushHistory();
   state.appView = appView;
+  if (appView === "life") currentTopic().view = "topics";
   saveState();
   render();
 }
@@ -1443,6 +1468,7 @@ function goBack() {
     state.selectedTopicId = parentId;
   }
   state.navigationHistory = navHistory;
+  if (state.appView === "life") currentTopic().view = "topics";
   saveState();
   render();
 }
@@ -2510,7 +2536,7 @@ function render() {
     button.classList.toggle("active", button.dataset.view === view);
     button.setAttribute("aria-pressed", String(button.dataset.view === view));
   });
-  document.querySelector(".task-panel h3").textContent = subjectMode ? "Homework" : "Tasks";
+  document.querySelector(".task-panel h3").textContent = "Tasks";
   els.appNav.querySelectorAll("[data-app-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.appView === appView);
   });

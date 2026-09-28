@@ -15,6 +15,7 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Life areas">
+        <div class="sidebar-scroll">
         <div class="brand">
           <div class="brand-mark">LA</div>
           <div>
@@ -39,10 +40,18 @@
         </nav>
 
         <nav class="topic-tree" id="topicTree" aria-label="Life areas"></nav>
+        </div>
+        <div class="sidebar-footer" id="workspaceDesktopSlot">
+          <button class="studio-launcher" id="studioLauncher" type="button" aria-expanded="false" aria-controls="studioDrawer">
+            <span class="studio-launcher-mark" aria-hidden="true"></span>
+            <span>Workspace</span>
+          </button>
+        </div>
       </aside>
 
       <main class="workspace">
         <header class="topbar">
+          <div class="mobile-workspace-slot" id="workspaceMobileSlot"></div>
           <div class="title-row">
             <button class="back-button" id="backButton" type="button" aria-label="Go back">&larr;</button>
             <div>
@@ -96,8 +105,8 @@
         </section>
 
         <div class="subject-tabs" id="subjectTabs" hidden>
-          <button class="subject-tab" type="button" data-view="topics">Topics</button>
-          <button class="subject-tab active" type="button" data-view="homework">Homework</button>
+          <button class="subject-tab active" type="button" data-view="topics">Areas</button>
+          <button class="subject-tab" type="button" data-view="homework">Tasks</button>
           <button class="subject-tab" type="button" data-view="notes">Notes</button>
         </div>
 
@@ -106,7 +115,7 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Inside this area</p>
-                <h3>Topics</h3>
+                <h3>Areas</h3>
               </div>
               <div class="panel-actions">
                 <button class="icon-button" id="addChildTopic" type="button" aria-label="Add area">+</button>
@@ -477,11 +486,6 @@
       </main>
     </div>
 
-    <button class="studio-launcher" id="studioLauncher" type="button" aria-expanded="false" aria-controls="studioDrawer">
-      <span class="studio-launcher-mark" aria-hidden="true"></span>
-      <span>Workspace</span>
-    </button>
-
     <aside class="studio-drawer" id="studioDrawer" aria-label="Workspace controls" aria-hidden="true" hidden>
       <button class="workspace-resize" id="workspaceResize" type="button" aria-label="Resize workspace" title="Resize workspace"></button>
       <div class="studio-drawer-head">
@@ -535,6 +539,17 @@
             <option value="night">Night mode</option>
           </select>
         </label>
+        <div class="studio-setting-block">
+          <label class="studio-setting-title" for="areaTabOrderSelect"><strong>Area tab order</strong></label>
+          <select id="areaTabOrderSelect" aria-label="Area tab order">
+            <option value="topics,homework,notes">Areas / Tasks / Notes</option>
+            <option value="topics,notes,homework">Areas / Notes / Tasks</option>
+            <option value="homework,topics,notes">Tasks / Areas / Notes</option>
+            <option value="homework,notes,topics">Tasks / Notes / Areas</option>
+            <option value="notes,topics,homework">Notes / Areas / Tasks</option>
+            <option value="notes,homework,topics">Notes / Tasks / Areas</option>
+          </select>
+        </div>
         <label class="studio-setting-row">
           <span><strong>Gentle motion</strong><small>Use soft transitions when completing tasks.</small></span>
           <input id="motionToggle" type="checkbox" checked />
