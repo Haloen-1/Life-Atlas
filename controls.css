@@ -31,6 +31,9 @@
 }
 
 .atlas-dragging { user-select: none; }
+.habits-panel > .panel-heading { flex-wrap: wrap; gap: 12px; }
+#completeHabitsToday { max-width: 100%; white-space: normal; transition: background-color 180ms ease, color 180ms ease; }
+#completeHabitsToday.all-done { background: var(--soft); color: var(--green-dark); opacity: 1; }
 .atlas-drag-ghost {
   position: fixed !important;
   z-index: 1000;

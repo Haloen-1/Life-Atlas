@@ -170,6 +170,7 @@ const els = {
   folderModalHandle: document.querySelector("#folderModalHandle"),
   habitForm: document.querySelector("#habitForm"),
   habitDate: document.querySelector("#habitDate"),
+  completeHabitsToday: document.querySelector("#completeHabitsToday"),
   habitInput: document.querySelector("#habitInput"),
   habitList: document.querySelector("#habitList"),
   financeAmount: document.querySelector("#financeAmount"),
@@ -367,6 +368,7 @@ els.showNextExam.addEventListener("click", () => {
 els.examForm.addEventListener("submit", addExam);
 els.habitForm.addEventListener("submit", addHabit);
 els.habitDate.addEventListener("change", () => renderHabits());
+els.completeHabitsToday.addEventListener("click", completeHabitsToday);
 document.querySelector("#habitRepeatDays").addEventListener("click", (event) => {
   const button = event.target.closest("[data-habit-day]");
   if (!button) return;
@@ -1855,6 +1857,21 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
   render();
 }
 
+function completeHabitsToday() {
+  const key = todayKey();
+  if (selectedHabitDate() !== key) return;
+  const pending = state.habits.filter((habit) => isHabitScheduled(habit, key)
+    && !(habit.completedDates || []).includes(key));
+  if (!pending.length) return;
+  pending.forEach((habit) => {
+    habit.completedDates = [...(habit.completedDates || []), key];
+  });
+  saveState();
+  render();
+  celebrate();
+  showToast("All habits complete for today.");
+}
+
 function deleteHabit(habitId) {
   state.habits = state.habits.filter((habit) => habit.id !== habitId);
   saveState();
@@ -2927,6 +2944,12 @@ function renderHabits() {
   if (!els.habitDate.value) els.habitDate.value = todayKey();
   const selectedDate = selectedHabitDate();
   const selectedLabel = selectedDate === todayKey() ? "today" : shortDate(selectedDate);
+  const scheduledToday = state.habits.filter((habit) => isHabitScheduled(habit, todayKey()));
+  const allDone = scheduledToday.length > 0 && scheduledToday.every((habit) => (habit.completedDates || []).includes(todayKey()));
+  els.completeHabitsToday.hidden = selectedDate !== todayKey() || !state.habits.length;
+  els.completeHabitsToday.disabled = !scheduledToday.length || allDone;
+  els.completeHabitsToday.classList.toggle("all-done", allDone);
+  els.completeHabitsToday.textContent = allDone ? "All done today" : scheduledToday.length ? "Complete all today" : "No habits scheduled today";
 
   if (!state.habits.length) {
     els.habitList.innerHTML = `<div class="empty">No habits yet. Add one daily rhythm to track.</div>`;

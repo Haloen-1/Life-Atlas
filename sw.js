@@ -1,4 +1,4 @@
-const CACHE_NAME = "life-atlas-v4-area-tabs";
+const CACHE_NAME = "life-atlas-v5-complete-habits";
 const APP_FILES = [
   "./",
   "./index.html",

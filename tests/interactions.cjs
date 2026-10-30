@@ -109,6 +109,42 @@ let browser;
     } finally { todayKey = original; }
   });
   assert.deepEqual(streaks, { current: 3, best: 3, off: false, missed: false, scheduledMiss: true, repaired: 1, legacy: 7 });
+  const originalHabits = await page.evaluate(() => structuredClone(state.habits));
+  await page.evaluate(() => {
+    const today = todayKey();
+    const weekday = new Date(`${today}T12:00:00`).getDay();
+    state.habits = [
+      { id: "bulk-pending", name: "Read", days: [weekday], completedDates: ["2026-01-01"], createdAt: 1 },
+      { id: "bulk-done", name: "Walk", days: [weekday], completedDates: [today], createdAt: 1 },
+      { id: "bulk-off", name: "Practice", days: [(weekday + 1) % 7], completedDates: [], createdAt: 1 }
+    ];
+    els.habitDate.value = today;
+    render();
+  });
+  await page.locator("#completeHabitsToday").click();
+  assert.equal(await page.locator("#completeHabitsToday").innerText(), "All done today");
+  assert(await page.locator("#completeHabitsToday").isDisabled());
+  assert.equal(await page.locator(".habit-card.done").count(), 2);
+  assert.deepEqual(await page.evaluate(() => {
+    completeHabitsToday();
+    return state.habits.map((habit) => habit.completedDates);
+  }), await page.evaluate(() => [["2026-01-01", todayKey()], [todayKey()], []]), "only due habits complete, without duplicates");
+  assert(await page.evaluate(() => habitStreak(state.habits[0]) >= 1), "bulk completion updates streaks");
+  await page.reload();
+  assert.equal(await page.locator("#completeHabitsToday").innerText(), "All done today", "completion persists");
+  await page.locator('[data-habit-id="bulk-pending"] [data-action="toggle"]').click();
+  assert(await page.locator("#completeHabitsToday").isEnabled(), "individual undo re-enables bulk completion");
+  await page.locator("#habitDate").fill("2025-01-01");
+  assert(await page.locator("#completeHabitsToday").isHidden(), "today action is hidden while viewing history");
+  await page.evaluate(() => { els.habitDate.value = todayKey(); renderHabits(); });
+  await page.screenshot({ path: path.join(artifacts, "habits-complete-all.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.screenshot({ path: path.join(artifacts, "habits-complete-all-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.evaluate(() => { state.habits = []; renderHabits(); });
+  assert(await page.locator("#completeHabitsToday").isHidden(), "no empty completion action");
+  await page.evaluate((habits) => { state.habits = habits; saveState(); render(); }, originalHabits);
 
   await page.locator('.app-nav [data-app-view="life"]').click();
   await page.locator('#subjectTabs [data-view="homework"]').click();
