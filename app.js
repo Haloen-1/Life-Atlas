@@ -289,6 +289,7 @@ const els = {
   seasonNameInput: document.querySelector("#seasonNameInput")
 };
 
+const habitCalendar = setupHabitCalendar(els.habitDate);
 ensureStateShape();
 populateExamSelectors();
 populateCalendarControls();
@@ -1104,6 +1105,10 @@ function loadState() {
 }
 
 function ensureStateShape() {
+  const batches = state.habitBulkCompletions;
+  state.habitBulkCompletions = Object.fromEntries(Object.entries(batches && typeof batches === "object" ? batches : {})
+    .filter(([key, ids]) => /^\d{4}-\d{2}-\d{2}$/.test(key) && Array.isArray(ids) && ids.length)
+    .map(([key, ids]) => [key, ids.filter((id) => typeof id === "string")]));
   if (!state.appView) state.appView = "life";
   if (!Array.isArray(state.navigationHistory)) state.navigationHistory = [];
   navHistory = state.navigationHistory;
@@ -1858,18 +1863,26 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
 }
 
 function completeHabitsToday() {
-  const key = todayKey();
-  if (selectedHabitDate() !== key) return;
-  const pending = state.habits.filter((habit) => isHabitScheduled(habit, key)
-    && !(habit.completedDates || []).includes(key));
-  if (!pending.length) return;
-  pending.forEach((habit) => {
-    habit.completedDates = [...(habit.completedDates || []), key];
-  });
+  const key = selectedHabitDate();
+  const scheduled = state.habits.filter((habit) => isHabitScheduled(habit, key));
+  const previousBatch = state.habitBulkCompletions[key];
+  const pending = scheduled.filter((habit) => !(habit.completedDates || []).includes(key));
+  if (!scheduled.length && !previousBatch) return;
+  const undo = Boolean(previousBatch) || !pending.length;
+  if (undo) {
+    const ids = new Set(previousBatch || scheduled.map((habit) => habit.id));
+    state.habits.forEach((habit) => {
+      if (ids.has(habit.id)) habit.completedDates = (habit.completedDates || []).filter((date) => date !== key);
+    });
+    delete state.habitBulkCompletions[key];
+  } else {
+    state.habitBulkCompletions[key] = pending.map((habit) => habit.id);
+    pending.forEach((habit) => { habit.completedDates = [...(habit.completedDates || []), key]; });
+  }
   saveState();
   render();
-  celebrate();
-  showToast("All habits complete for today.");
+  if (!undo) celebrate();
+  showToast(undo ? "Habit completion undone." : `All habits complete for ${key === todayKey() ? "today" : shortDate(key)}.`);
 }
 
 function deleteHabit(habitId) {
@@ -2942,14 +2955,16 @@ function renderExams(exams) {
 function renderHabits() {
   els.habitList.innerHTML = "";
   if (!els.habitDate.value) els.habitDate.value = todayKey();
+  habitCalendar.sync();
   const selectedDate = selectedHabitDate();
   const selectedLabel = selectedDate === todayKey() ? "today" : shortDate(selectedDate);
-  const scheduledToday = state.habits.filter((habit) => isHabitScheduled(habit, todayKey()));
-  const allDone = scheduledToday.length > 0 && scheduledToday.every((habit) => (habit.completedDates || []).includes(todayKey()));
-  els.completeHabitsToday.hidden = selectedDate !== todayKey() || !state.habits.length;
-  els.completeHabitsToday.disabled = !scheduledToday.length || allDone;
+  const scheduled = state.habits.filter((habit) => isHabitScheduled(habit, selectedDate));
+  const allDone = scheduled.length > 0 && scheduled.every((habit) => (habit.completedDates || []).includes(selectedDate));
+  const hasBatch = Boolean(state.habitBulkCompletions[selectedDate]);
+  els.completeHabitsToday.hidden = !state.habits.length;
+  els.completeHabitsToday.disabled = !scheduled.length && !hasBatch;
   els.completeHabitsToday.classList.toggle("all-done", allDone);
-  els.completeHabitsToday.textContent = allDone ? "All done today" : scheduledToday.length ? "Complete all today" : "No habits scheduled today";
+  els.completeHabitsToday.textContent = hasBatch ? "Undo complete all" : allDone ? "Uncheck all" : scheduled.length ? (selectedDate === todayKey() ? "Complete all today" : "Complete all for this day") : "No habits scheduled";
 
   if (!state.habits.length) {
     els.habitList.innerHTML = `<div class="empty">No habits yet. Add one daily rhythm to track.</div>`;

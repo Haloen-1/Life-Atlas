@@ -1,3 +1,128 @@
+function setupHabitCalendar(input) {
+  const trigger = document.querySelector("#habitDateButton");
+  const popup = document.querySelector("#habitCalendar");
+  const heading = document.querySelector("#habitCalendarHeading");
+  const grid = document.querySelector("#habitCalendarGrid");
+  let month = new Date();
+  let choosingMonth = false;
+  const key = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const selected = () => new Date(`${input.value || key(new Date())}T12:00:00`);
+  const fullLabel = (date) => date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const open = () => popup.matches(":popover-open");
+  function position() {
+    if (!open()) return;
+    const box = trigger.getBoundingClientRect();
+    popup.style.left = `${Math.max(12, Math.min(box.left, innerWidth - popup.offsetWidth - 12))}px`;
+    const below = box.bottom + 8;
+    popup.style.top = `${Math.max(12, Math.min(below, innerHeight - popup.offsetHeight - 12))}px`;
+  }
+  function close(focus = true) {
+    if (open()) popup.hidePopover();
+    if (focus) trigger.focus();
+  }
+  function choose(date) {
+    input.value = key(date);
+    close();
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function render(focusDate) {
+    heading.textContent = choosingMonth ? String(month.getFullYear()) : month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    heading.setAttribute("aria-label", choosingMonth ? "Back to days" : "Choose month and year");
+    popup.querySelector('[data-calendar-action="previous"]').setAttribute("aria-label", choosingMonth ? "Previous year" : "Previous month");
+    popup.querySelector('[data-calendar-action="next"]').setAttribute("aria-label", choosingMonth ? "Next year" : "Next month");
+    grid.replaceChildren();
+    grid.className = choosingMonth ? "habit-month-grid" : "habit-day-grid";
+    if (choosingMonth) {
+      for (let i = 0; i < 12; i++) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = new Date(month.getFullYear(), i, 1).toLocaleDateString(undefined, { month: "short" });
+        button.setAttribute("aria-label", new Date(month.getFullYear(), i, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" }));
+        button.addEventListener("click", () => { month.setMonth(i); choosingMonth = false; render(key(month)); });
+        grid.append(button);
+      }
+    } else {
+      ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach((day) => {
+        const label = document.createElement("span");
+        label.className = "habit-weekday";
+        label.textContent = day;
+        grid.append(label);
+      });
+      const first = new Date(month.getFullYear(), month.getMonth(), 1, 12);
+      const today = key(new Date());
+      for (let i = 0; i < 42; i++) {
+        const date = new Date(first);
+        date.setDate(1 - first.getDay() + i);
+        const value = key(date);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = date.getDate();
+        button.dataset.date = value;
+        button.setAttribute("aria-label", fullLabel(date));
+        button.setAttribute("aria-pressed", String(value === input.value));
+        if (value === today) button.setAttribute("aria-current", "date");
+        button.classList.toggle("outside-month", date.getMonth() !== month.getMonth());
+        button.tabIndex = value === (focusDate || input.value) ? 0 : -1;
+        button.addEventListener("click", () => choose(date));
+        grid.append(button);
+      }
+      if (!grid.querySelector('[tabindex="0"]')) grid.querySelector(`[data-date="${key(first)}"]`).tabIndex = 0;
+      if (focusDate) grid.querySelector(`[data-date="${focusDate}"]`)?.focus();
+    }
+    position();
+  }
+  trigger.addEventListener("click", () => {
+    if (open()) { close(); return; }
+    closeAtlasSelect();
+    month = selected(); month.setDate(1);
+    choosingMonth = false;
+    render();
+    popup.showPopover();
+    position();
+    grid.querySelector('[tabindex="0"]')?.focus({ preventScroll: true });
+  });
+  popup.addEventListener("toggle", () => trigger.setAttribute("aria-expanded", String(open())));
+  heading.addEventListener("click", () => { choosingMonth = !choosingMonth; render(); });
+  popup.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-calendar-action]")?.dataset.calendarAction;
+    if (action === "close") close();
+    if (action === "today") choose(new Date());
+    if (action === "previous" || action === "next") {
+      const direction = action === "previous" ? -1 : 1;
+      if (choosingMonth) month.setFullYear(month.getFullYear() + direction);
+      else month.setMonth(month.getMonth() + direction);
+      render();
+    }
+  });
+  popup.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    const value = event.target.dataset.date;
+    if (!value) return;
+    const date = new Date(`${value}T12:00:00`);
+    const offsets = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -date.getDay(), End: 6 - date.getDay() };
+    if (event.key in offsets) date.setDate(date.getDate() + offsets[event.key]);
+    else if (event.key === "PageUp" || event.key === "PageDown") {
+      const day = date.getDate();
+      date.setDate(1);
+      date.setMonth(date.getMonth() + (event.key === "PageUp" ? -1 : 1));
+      date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+    } else return;
+    event.preventDefault();
+    month = new Date(date); month.setDate(1);
+    render(key(date));
+  });
+  document.querySelector("#habitPreviousDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() - 1); choose(date); });
+  document.querySelector("#habitNextDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() + 1); choose(date); });
+  document.querySelector("#habitToday").addEventListener("click", () => choose(new Date()));
+  window.addEventListener("resize", position);
+  document.addEventListener("scroll", position, true);
+  return { sync() {
+    trigger.textContent = selected().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    trigger.setAttribute("aria-label", `Choose habit date: ${fullLabel(selected())}`);
+    document.querySelector("#habitToday").disabled = input.value === key(new Date());
+  } };
+}
+
 /* Keep native selects as the form/data layer, with one accessible custom popup above them. */
 (() => {
   const records = new Map();

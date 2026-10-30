@@ -425,10 +425,25 @@
               </div>
               <button class="primary-button compact" id="completeHabitsToday" type="button" hidden>Complete all today</button>
             </div>
-            <label class="habit-date-control">
-              Mark habits for
-              <input id="habitDate" type="date" />
-            </label>
+            <div class="habit-date-toolbar" aria-label="Habit date">
+              <input id="habitDate" type="hidden" />
+              <button class="habit-date-arrow" id="habitPreviousDay" type="button" aria-label="Previous day">&#8249;</button>
+              <button id="habitDateButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="habitCalendar">Choose date</button>
+              <button class="habit-date-arrow" id="habitNextDay" type="button" aria-label="Next day">&#8250;</button>
+              <button id="habitToday" type="button">Today</button>
+            </div>
+            <div class="habit-calendar" id="habitCalendar" popover="auto" role="dialog" aria-label="Choose habit date">
+              <div class="habit-calendar-heading">
+                <button type="button" data-calendar-action="previous" aria-label="Previous month">&#8249;</button>
+                <button type="button" id="habitCalendarHeading" aria-label="Choose month and year"></button>
+                <button type="button" data-calendar-action="next" aria-label="Next month">&#8250;</button>
+              </div>
+              <div id="habitCalendarGrid"></div>
+              <div class="habit-calendar-footer">
+                <button type="button" data-calendar-action="today">Today</button>
+                <button type="button" data-calendar-action="close">Close</button>
+              </div>
+            </div>
             <div class="habit-list" id="habitList"></div>
             <form class="inline-form habit-new-form" id="habitForm">
               <span class="habit-new-label">New habit</span>
