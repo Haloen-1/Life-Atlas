@@ -48,6 +48,34 @@ let browser;
   await page.locator("#childTopics .folder-card").click();
   assert.equal(await page.locator("#subjectTabs .active").innerText(), "Areas", "reentering area resets tab");
   await page.locator('#subjectTabs [data-view="notes"]').click();
+  const editor = page.locator("#topicNotes");
+  const legacyNote = "Draft&nbsp;one&amp;amp;nbsp;two\nR&amp;D &lt; 5";
+  await page.evaluate((notes) => { currentTopic().notes = notes; render(); }, legacyNote);
+  assert.equal(await editor.textContent(), "Draft\u00a0one\u00a0twoR&D < 5");
+  assert.equal(await editor.locator("br").count(), 1);
+  assert.equal(await page.evaluate(() => currentTopic().notes), legacyNote, "reading does not rewrite an older note");
+  await page.evaluate(() => {
+    currentTopic().notes = '<ul><li>One&amp;nbsp;step</li></ul><a href="/?q=&amp;nbsp;">Link</a>';
+    render();
+  });
+  assert.equal(await editor.locator("li").textContent(), "One\u00a0step");
+  assert.equal(await editor.locator("a").getAttribute("href"), "/?q=&nbsp;", "legacy space repair leaves link attributes alone");
+  assert.equal(await page.evaluate(() => notePreview({notes: "&amp;amp;nbsp;<br>"})), "No notes yet");
+  await editor.fill("");
+  await editor.pressSequentially("R&D  <plan>  &nbsp; ");
+  const typed = await editor.textContent();
+  assert.equal(typed.replace(/\u00a0/g, " "), "R&D  <plan>  &nbsp; ");
+  for (let i = 0; i < 2; i++) {
+    await page.locator('#subjectTabs [data-view="topics"]').click();
+    await page.locator('#subjectTabs [data-view="notes"]').click();
+    assert.equal(await editor.textContent(), typed, "reopening preserves spaces, angle brackets and intentionally typed entity text");
+    await editor.press("End");
+    await editor.press("x");
+    await editor.press("Backspace");
+  }
+  await page.reload();
+  assert.equal((await editor.textContent()).replace(/\u00a0/g, " "), "R&D  <plan>  &nbsp; ", "saved note round-trips across reload");
+  assert.equal(await editor.locator("plan").count(), 0);
   await page.locator("#topicTree .tree-row.active").click();
   assert.equal(await page.locator("#subjectTabs .active").innerText(), "Areas", "sidebar reentry resets tab");
   await page.locator("#backButton").click();

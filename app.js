@@ -1384,25 +1384,37 @@ function downloadTextFile(filename, text, type = "text/plain") {
 }
 
 function saveCurrentNotes() {
-  currentTopic().notes = normalizeNoteHtml(els.topicNotes.innerHTML);
+  const topic = currentTopic();
+  topic.notes = readAreaNote(els.topicNotes.innerHTML, "html").innerHTML;
+  topic.notesFormat = "html";
   saveState();
 }
 
-function normalizeNoteHtml(value) {
-  const container = document.createElement("div");
-  container.innerHTML = String(value || "");
-  container.querySelectorAll("script, style").forEach((node) => node.remove());
-  container.querySelectorAll("a").forEach((link) => {
+function readAreaNote(value, format) {
+  const raw = String(value || "");
+  const template = document.createElement("template");
+  const legacyText = format !== "html" && !/<[a-z][\s\S]*>/i.test(raw);
+  template.innerHTML = legacyText ? raw.replace(/</g, "&lt;").replace(/\r?\n/g, "<br>") : raw;
+  const content = template.content;
+  // Earlier versions repeatedly escaped spaces when a saved note had no tags.
+  if (format !== "html" && raw.includes("&")) {
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      node.data = node.data.replace(/&(?:amp;)*(?:nbsp|#0*160|#x0*a0);/gi, "\u00a0");
+    }
+  }
+  content.querySelectorAll("script, style").forEach((node) => node.remove());
+  content.querySelectorAll("a").forEach((link) => {
     link.setAttribute("target", "_blank");
     link.setAttribute("rel", "noopener noreferrer");
   });
-  return container.innerHTML;
+  return template;
 }
 
-function noteHtml(value) {
-  const raw = String(value || "");
-  if (/<[a-z][\s\S]*>/i.test(raw)) return normalizeNoteHtml(raw);
-  return escapeHtml(raw).replace(/\n/g, "<br>");
+function areaNoteText(topic) {
+  if (!topic.notes) return "";
+  return readAreaNote(topic.notes, topic.notesFormat).content.textContent.replace(/\s+/g, " ").trim();
 }
 
 function currentTopic() {
@@ -2539,11 +2551,11 @@ function render() {
   els.renameTopic.hidden = appView !== "life";
   els.deleteTopic.hidden = appView !== "life";
   if (document.activeElement !== els.topicNotes) {
-    els.topicNotes.innerHTML = noteHtml(topic.notes || "");
+    els.topicNotes.innerHTML = readAreaNote(topic.notes, topic.notesFormat).innerHTML;
   }
   els.openTaskCount.textContent = state.tasks.filter((task) => !task.done).length;
   els.topicCount.textContent = String(state.topics.length - 1);
-  const noteTotal = state.topics.filter((item) => stripHtml(item.notes).trim()).length + state.brainNotes.length;
+  const noteTotal = state.topics.filter((item) => areaNoteText(item)).length + state.brainNotes.length;
   els.noteCount.textContent = String(noteTotal);
   els.noteMetricDetail.textContent = noteTotal === 1 ? "One place of context" : "Places of context";
   els.nextExam.textContent = next ? `${next.name} - ${shortDate(next.when)}` : "None";
@@ -2793,7 +2805,7 @@ function renderChildren(topicId) {
       <button class="folder-delete" type="button" aria-label="Delete ${escapeHtml(child.title)}">x</button>
       <span class="area-badge" style="background:${escapeHtml(child.color || "#4f6f52")}" aria-hidden="true">${escapeHtml(child.icon || initials(child.title))}</span>
       <strong>${escapeHtml(child.title)}</strong>
-      <span class="folder-note">${escapeHtml(notePreview(child.notes))}</span>
+      <span class="folder-note">${escapeHtml(notePreview(child))}</span>
       <span class="folder-meta">${state.tasks.filter((task) => task.topicId === child.id && !task.done).length} tasks</span>
     `;
     card.querySelector(".folder-delete").addEventListener("click", (event) => {
@@ -2822,7 +2834,7 @@ function renderMap() {
   });
   areaMapController.update({
     active: state.appView === "map",
-    topics: state.topics.map((topic) => ({ ...topic, note: stripHtml(topic.notes).trim() })),
+    topics: state.topics.map((topic) => ({ ...topic, note: areaNoteText(topic) })),
     orientation: state.settings.mapOrientation,
     positions: state.mapPositions[state.settings.mapOrientation],
     showNotes: state.settings.mapShowNotes,
@@ -3956,8 +3968,8 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-function notePreview(value) {
-  const text = stripHtml(value).trim();
+function notePreview(topic) {
+  const text = areaNoteText(topic);
   if (!text) return "No notes yet";
   return text.length > 86 ? `${text.slice(0, 83)}...` : text;
 }
