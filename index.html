@@ -256,10 +256,22 @@
             <div class="time-tracker-heading">
               <div>
                 <p class="eyebrow">Weekly plan</p>
-                <h3>Schedule</h3>
+                <h3 id="weekViewTitle">My week</h3>
+              </div>
+              <div class="segmented compact" id="scheduleViews" aria-label="Schedule view">
+                <button type="button" data-schedule-view="week" aria-pressed="true">Week</button>
+                <button type="button" data-schedule-view="journal" aria-pressed="false">Journal</button>
               </div>
             </div>
-
+            <section id="journalView" hidden aria-label="Daily journal">
+              <div class="journal-heading"><div><p class="eyebrow">Daily entry</p><h3>Journal</h3></div><button type="button" id="journalTrends" class="ghost-button">Sleep trends</button></div>
+              <div id="journalDateControl"></div>
+              <textarea id="journalBody" aria-label="Journal entry" placeholder="What stayed with you today?"></textarea>
+              <div class="journal-sleep"><label>Fell asleep <input id="journalBed" type="time" /></label>
+                <label>Woke up <input id="journalWake" type="time" /></label><span id="journalDuration"></span></div>
+              <small id="journalSaved" role="status"></small>
+            </section>
+            <div id="weeklyView">
             <div class="ideal-week-controls">
               <div>
                 <span class="ideal-week-label">Season</span>
@@ -268,7 +280,7 @@
                   <button type="button" data-schedule-season="summer">Summer</button>
                 </div>
               </div>
-              <div class="ideal-week-days" id="timeScheduleDays" aria-label="Ideal schedule day">
+              <div class="ideal-week-days weekday-picker" id="timeScheduleDays" aria-label="Schedule day">
                 <button type="button" data-schedule-day="0">Sun</button>
                 <button type="button" data-schedule-day="1">Mon</button>
                 <button type="button" data-schedule-day="2">Tue</button>
@@ -283,10 +295,13 @@
               <button class="sleep-trend-open" id="sleepTrendOpen" type="button">Sleep trends</button>
               <label>Sleep <input id="sleepStart" type="time" step="300" required /></label>
               <label>Wake <input id="wakeTime" type="time" step="300" required /></label>
+              <select id="sleepApplyDays" aria-label="Apply planned sleep to"><option value="day">This day</option><option value="weekdays">Mon to Fri</option><option value="weekend">Sat and Sun</option><option value="all">Every day</option></select>
               <button class="primary-button compact" type="submit">Save</button>
               <button class="ghost-button compact" id="sleepRoutineClear" type="button">Clear</button>
             </form>
 
+            <dialog class="modal schedule-dialog" id="blockDialog" aria-labelledby="blockDialogTitle">
+            <h3 id="blockDialogTitle">New block</h3>
             <form class="time-block-form" id="timeBlockForm">
               <input id="timeBlockName" type="text" placeholder="What are you doing?" autocomplete="off" required />
               <select id="timeBlockCategory" aria-label="Time category">
@@ -301,7 +316,7 @@
               <label>From <input id="timeBlockStart" type="time" step="300" required /></label>
               <label id="timeBlockEndLabel">To <input id="timeBlockEnd" type="time" step="300" required /></label>
               <button class="primary-button compact" id="timeBlockSave" type="submit">Add block</button>
-              <button class="ghost-button" id="timeBlockCancel" type="button" hidden>Cancel</button>
+              <button class="ghost-button" id="timeBlockCancel" type="button">Cancel</button>
               <div class="time-block-repeat">
                 <span>Repeat on</span>
                 <div class="time-block-repeat-days" id="timeBlockRepeatDays" aria-label="Repeat block on days">
@@ -316,17 +331,20 @@
               </div>
             </form>
 
+            </dialog>
             <div class="time-board" id="timeBoard">
               <section class="time-lane-section">
                 <div class="time-lane-heading">
                   <div><span class="time-lane-dot ideal"></span><strong>Schedule</strong></div>
                   <div class="time-lane-meta">
                     <span id="idealDayLabel">Academic year / Monday</span>
+                    <button class="ghost-button compact" id="newScheduleBlock" type="button">Add block</button>
                     <div class="sleep-summary" id="sleepSummary"></div>
                   </div>
                 </div>
                 <div class="time-lane" id="idealTimeLane" data-time-kind="ideal"></div>
               </section>
+            </div>
             </div>
           </section>
 
@@ -515,6 +533,7 @@
         <button class="studio-tab active" type="button" data-studio-tab="focus">Focus</button>
         <button class="studio-tab" type="button" data-studio-tab="history">History</button>
         <button class="studio-tab" type="button" data-studio-tab="settings">Settings</button>
+        <button class="studio-tab" type="button" data-studio-tab="permissions">Permissions</button>
       </nav>
       <section class="studio-pane active" data-studio-pane="focus">
         <div class="studio-focus-card">
@@ -538,6 +557,20 @@
           <span class="studio-count" id="historyCount">0</span>
         </div>
         <div class="history-list" id="historyList"></div>
+      </section>
+      <section class="studio-pane" data-studio-pane="permissions" hidden>
+        <h3>Journal reminders</h3>
+        <form id="journalReminderForm" class="reminder-form">
+          <label class="studio-setting-row">Desktop reminders <input id="jrEnabled" type="checkbox" /></label>
+          <small id="jrStatus" role="status"></small>
+          <div class="reminder-pair"><label>At <input id="jrTime" type="time" required /></label>
+            <label>Starting <input id="jrStart" type="date" required /></label></div>
+          <div class="reminder-pair"><label>Every <input id="jrInterval" type="number" min="1" max="99" required /></label>
+            <label>Period <select id="jrFrequency"><option value="day">Days</option><option value="week">Weeks</option><option value="month">Months</option><option value="year">Years</option></select></label></div>
+          <div class="weekday-picker" id="jrDays" aria-label="Reminder weekdays" hidden></div>
+          <label>End date (optional) <input id="jrEnd" type="date" /></label>
+          <div class="modal-actions"><button class="ghost-button" type="button" id="jrExport">Export to calendar</button><button class="primary-button compact" type="submit">Save reminder</button></div>
+        </form>
       </section>
       <section class="studio-pane" data-studio-pane="settings" hidden>
         <div class="studio-pane-heading">
@@ -570,6 +603,14 @@
           <span><strong>Gentle motion</strong><small>Use soft transitions when completing tasks.</small></span>
           <input id="motionToggle" type="checkbox" checked />
         </label>
+        <label class="studio-setting-row">
+          <span><strong>Habit deletion</strong><small>Require typing the habit name in the confirmation dialog.</small></span>
+          <input id="habitDeleteNameRequired" type="checkbox" />
+        </label>
+        <label class="studio-setting-row">
+          <span><strong>Habit day shortcuts</strong></span>
+          <input id="habitDayShortcuts" type="checkbox" checked />
+        </label>
         <div class="studio-setting-block">
           <div class="studio-setting-title"><strong>Visible sections</strong><small>Keep only the tools you actually use.</small></div>
           <div class="section-visibility" id="sectionVisibility"></div>
@@ -582,7 +623,13 @@
             <button type="submit" aria-label="Add season">+</button>
           </form>
         </div>
+        <label class="studio-setting-row"><span><strong>New schedule block</strong><small>Default length when clicking a time.</small></span>
+          <select id="defaultBlockMinutes"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">90 minutes</option></select>
+        </label>
         <div class="studio-setting-actions">
+          <button type="button" id="workspaceJournal">Open journal</button>
+          <button type="button" id="workspaceWeek">Edit weekly schedule</button>
+          <button type="button" id="workspaceReminders">Journal reminders</button>
           <button type="button" data-studio-action="import">Import data</button>
           <button type="button" data-studio-action="export">Export data</button>
           <button type="button" data-studio-action="notifications">Enable alerts</button>
@@ -625,6 +672,19 @@
         </div>
       </form>
     </div>
+
+    <dialog class="modal habit-delete-dialog" id="habitDeleteDialog" aria-labelledby="habitDeleteTitle" aria-describedby="habitDeleteCopy">
+      <p class="eyebrow">Habits</p>
+      <h3 id="habitDeleteTitle"></h3>
+      <p class="modal-copy" id="habitDeleteCopy"></p>
+      <label id="habitDeleteNameRow" hidden>Type the habit name to confirm
+        <input id="habitDeleteName" type="text" autocomplete="off" />
+      </label>
+      <div class="modal-actions">
+        <button class="ghost-button" id="cancelHabitDelete" type="button" autofocus>Cancel</button>
+        <button class="danger-button" id="confirmHabitDelete" type="button">Delete habit</button>
+      </div>
+    </dialog>
 
     <div class="modal-backdrop" id="deleteModal" hidden>
       <div class="modal">
@@ -676,6 +736,7 @@
     <script src="vendor/d3.v7.min.js"></script>
     <script src="area-map.js"></script>
     <script src="controls.js"></script>
+    <script src="journal.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

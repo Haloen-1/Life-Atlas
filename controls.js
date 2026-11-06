@@ -1,8 +1,9 @@
-function setupHabitCalendar(input) {
-  const trigger = document.querySelector("#habitDateButton");
-  const popup = document.querySelector("#habitCalendar");
-  const heading = document.querySelector("#habitCalendarHeading");
-  const grid = document.querySelector("#habitCalendarGrid");
+function setupHabitCalendar(input, prefix = "habit") {
+  const part = (name) => document.getElementById(prefix + name);
+  const trigger = part("DateButton");
+  const popup = part("Calendar");
+  const heading = part("CalendarHeading");
+  const grid = part("CalendarGrid");
   let month = new Date();
   let choosingMonth = false;
   const key = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -111,15 +112,15 @@ function setupHabitCalendar(input) {
     month = new Date(date); month.setDate(1);
     render(key(date));
   });
-  document.querySelector("#habitPreviousDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() - 1); choose(date); });
-  document.querySelector("#habitNextDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() + 1); choose(date); });
-  document.querySelector("#habitToday").addEventListener("click", () => choose(new Date()));
+  part("PreviousDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() - 1); choose(date); });
+  part("NextDay").addEventListener("click", () => { const date = selected(); date.setDate(date.getDate() + 1); choose(date); });
+  part("Today").addEventListener("click", () => choose(new Date()));
   window.addEventListener("resize", position);
   document.addEventListener("scroll", position, true);
   return { sync() {
     trigger.textContent = selected().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-    trigger.setAttribute("aria-label", `Choose habit date: ${fullLabel(selected())}`);
-    document.querySelector("#habitToday").disabled = input.value === key(new Date());
+    trigger.setAttribute("aria-label", `Choose ${prefix} date: ${fullLabel(selected())}`);
+    part("Today").disabled = input.value === key(new Date());
   } };
 }
 
@@ -194,6 +195,7 @@ function setupHabitCalendar(input) {
     closeAtlasSelect();
     syncAtlasSelects();
     opened = select;
+    (select.closest("dialog") || document.body).append(menu);
     menu.replaceChildren();
     menu.setAttribute("aria-label", labelFor(select));
     [...select.options].forEach((option, index) => {

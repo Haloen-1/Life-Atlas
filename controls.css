@@ -31,6 +31,47 @@
 }
 
 .atlas-dragging { user-select: none; }
+.schedule-dialog { width: min(440px, calc(100% - 28px)); margin: auto; background: var(--panel); color: var(--ink); }
+.schedule-dialog::backdrop { background: #19261e55; }
+.schedule-dialog .time-block-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; padding: 0; }
+.schedule-dialog h3 { margin: 0 0 16px; }
+.schedule-dialog #timeBlockName { grid-column: 1 / -1; }
+.schedule-dialog .atlas-select { grid-column: 1 / -1; }
+.schedule-dialog .atlas-select-trigger, .schedule-dialog .time-block-form input { height: 38px; min-height: 38px; }
+.schedule-dialog .time-block-repeat { grid-row: 4; flex-wrap: wrap; }
+.schedule-dialog #timeBlockSave, .schedule-dialog #timeBlockCancel { grid-row: 5; }
+.schedule-dialog .time-block-repeat-days { flex-wrap: wrap; }
+#idealTimeLane { touch-action: none; }
+.schedule-selection { position: absolute; inset-inline: 55px 6px; min-height: 4px; overflow: hidden; pointer-events: none; background: color-mix(in srgb,var(--green) 18%,var(--panel)); border: 1px dashed var(--green); border-radius: 6px; padding-inline: 8px; font-size: .78rem; color: var(--green-dark); }
+#timeScheduleDays { display: flex; flex-wrap: wrap; }
+#timeScheduleDays button { width: 40px; min-height: 36px; padding: 0; border-radius: 18px; }
+#sleepRoutineForm { display: inline-flex; flex-wrap: wrap; border-radius: 12px; }
+#sleepRoutineForm .atlas-select { width: 104px; align-self: center; }
+#sleepRoutineForm .atlas-select-trigger { min-height: 34px; }
+.time-tracker-heading, .journal-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+body[data-app-view="time"] .overview-grid, body[data-app-view="time"] #exportCalendar { display: none; }
+body[data-app-view="time"] .topbar { margin-bottom: 12px; }
+#weekViewTitle { font-size: 1.1rem; }
+#journalView { max-width: 740px; margin: 20px auto; }
+.journal-heading { margin-bottom: 12px; }
+#journalDateButton { background: var(--soft); color: var(--green-dark); }
+#journalBody { display: block; width: 100%; min-height: 220px; resize: vertical; margin: 14px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--panel); font: inherit; line-height: 1.65; }
+.journal-sleep { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.journal-sleep label, .reminder-form label:not(.studio-setting-row) { display: grid; gap: 5px; color: var(--muted); font-size: .8rem; font-weight: 650; }
+.journal-sleep input, .reminder-form input:not([type=checkbox]) { min-width: 0; max-width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 4px 8px; }
+#journalSaved, #journalDuration, #jrStatus { color: var(--muted); font-size: .78rem; }
+#journalSaved { display: block; margin-top: 12px; }
+.reminder-form { display: grid; gap: 12px; margin-top: 12px; }
+.reminder-pair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+#jrDays button { width: 32px; height: 32px; border-radius: 50%; }
+.studio-tabs { flex-wrap: wrap; }
+.studio-tab { padding-inline: 6px; }
+@media (prefers-reduced-motion: no-preference) {
+  body:not(.reduced-motion) :is(.schedule-dialog[open], #journalView:not([hidden]), #weeklyView:not([hidden])) { animation: atlas-menu-in 180ms ease-out; }
+}
+.habit-delete-dialog { margin: auto; width: min(420px, calc(100% - 32px)); background: var(--panel); color: var(--ink); overflow-wrap: anywhere; }
+.habit-delete-dialog::backdrop { background: rgb(23 33 27 / 32%); }
+#habitDeleteNameRow:not([hidden]) { display: grid; gap: 6px; margin-top: 14px; }
 .habits-panel > .panel-heading { flex-wrap: wrap; gap: 12px; }
 #completeHabitsToday { max-width: 100%; white-space: normal; transition: background-color 180ms ease, color 180ms ease; }
 #completeHabitsToday.all-done { background: var(--soft); color: var(--green-dark); opacity: 1; }

@@ -1,9 +1,10 @@
-const CACHE_NAME = "life-atlas-v7-note-spaces";
+const CACHE_NAME = "life-atlas-v10-habit-shortcuts";
 const APP_FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./journal.js",
   "./controls.js",
   "./controls.css",
   "./area-map.js",
@@ -11,6 +12,18 @@ const APP_FILES = [
   "./manifest.json",
   "./icon.svg"
 ];
+
+self.addEventListener("notificationclick", (event) => {
+  if (!event.notification.data?.journal) return;
+  event.notification.close();
+  const url = new URL("./index.html#journal", self.registration.scope);
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: "window" });
+    const client = clients.find((item) => item.url.startsWith(self.registration.scope));
+    if (client) { await client.focus(); client.postMessage("open-journal"); }
+    else await self.clients.openWindow(url.href);
+  })());
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

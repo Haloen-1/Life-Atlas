@@ -284,6 +284,10 @@ const els = {
   areaTabOrderSelect: document.querySelector("#areaTabOrderSelect"),
   sectionVisibility: document.querySelector("#sectionVisibility"),
   motionToggle: document.querySelector("#motionToggle"),
+  habitDeleteDialog: document.querySelector("#habitDeleteDialog"),
+  habitDeleteNameRequired: document.querySelector("#habitDeleteNameRequired"),
+  habitDeleteName: document.querySelector("#habitDeleteName"),
+  confirmHabitDelete: document.querySelector("#confirmHabitDelete"),
   seasonManager: document.querySelector("#seasonManager"),
   seasonAddForm: document.querySelector("#seasonAddForm"),
   seasonNameInput: document.querySelector("#seasonNameInput")
@@ -299,6 +303,7 @@ registerServiceWorker();
 setInterval(checkExamAlerts, 60 * 1000);
 document.addEventListener("contextmenu", (event) => event.preventDefault());
 document.addEventListener("keydown", handleScheduleUndoShortcut);
+document.addEventListener("keydown", handleHabitDayShortcut);
 
 els.addRootTopic.addEventListener("click", () => openFolderModal("add", "root"));
 els.addChildTopic.addEventListener("click", () => openFolderModal("add", state.selectedTopicId));
@@ -398,7 +403,9 @@ els.sleepTrendRange.addEventListener("click", (event) => {
 });
 els.timeBlockForm.addEventListener("submit", saveTimeBlock);
 els.timeBlockForm.addEventListener("keydown", handleTimeBlockFormEnter);
-els.timeBlockCancel.addEventListener("click", resetTimeBlockForm);
+els.timeBlockCancel.addEventListener("click", () => document.querySelector("#blockDialog").close());
+document.querySelector("#blockDialog").addEventListener("close", resetTimeBlockForm);
+document.querySelector("#newScheduleBlock").addEventListener("click", () => beginNewTimeBlock(Number(els.idealTimeLane.dataset.windowStart) || 480));
 els.timeBlockCategory.addEventListener("change", () => {
   if (els.timeBlockCategory.value === "food" && !els.timeBlockName.value.trim()) {
     els.timeBlockName.value = "Food";
@@ -425,6 +432,8 @@ els.timeScheduleDays.addEventListener("click", (event) => {
   const button = event.target.closest("[data-schedule-day]");
   if (!button) return;
   state.timeScheduleDay = Number(button.dataset.scheduleDay);
+  journalEl("sleepApplyDays").value = "day";
+  syncAtlasSelects();
   if (!editingTimeBlockId) timeBlockDraftDays = [state.timeScheduleDay];
   saveState();
   renderTimeTracker();
@@ -552,6 +561,17 @@ els.sectionVisibility.addEventListener("change", (event) => {
   render();
   setStudioTab("settings");
 });
+els.habitDeleteNameRequired.addEventListener("change", () => {
+  state.settings.requireHabitNameToDelete = els.habitDeleteNameRequired.checked;
+  saveState();
+});
+document.querySelector("#habitDayShortcuts").addEventListener("change", (event) => {
+  state.settings.habitDayShortcuts = event.target.checked;
+  saveState();
+});
+els.habitDeleteName.addEventListener("input", syncHabitDeleteConfirmation);
+document.querySelector("#cancelHabitDelete").addEventListener("click", () => els.habitDeleteDialog.close());
+els.confirmHabitDelete.addEventListener("click", confirmHabitDeletion);
 els.motionToggle.addEventListener("change", () => {
   state.settings.gentleMotion = els.motionToggle.checked;
   saveState();
@@ -588,6 +608,7 @@ setupWorkspaceResize(els.studioDrawer, document.querySelector("#workspaceResize"
   (size) => { state.settings.workspaceSize = size; saveState(); });
 setupPointerReordering();
 setupCustomSelects();
+setupJournal();
 
 function setupPriorityPanelDrag() {
   [
@@ -666,7 +687,8 @@ function toggleStudioDrawer(open) {
 }
 
 function setStudioTab(tab) {
-  if (!["focus", "history", "settings"].includes(tab)) return;
+  if (!["focus", "history", "settings", "permissions"].includes(tab)) return;
+  if (tab === "permissions") renderReminderSettings();
   studioTab = tab;
   els.studioTabs.querySelectorAll("[data-studio-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.studioTab === tab);
@@ -688,6 +710,9 @@ function applyAppSettings() {
   els.areaTabOrderSelect.value = tabOrder.join(",");
   tabOrder.forEach((view) => els.subjectTabs.append(els.subjectTabs.querySelector(`[data-view="${view}"]`)));
   els.motionToggle.checked = settings.gentleMotion !== false;
+  journalEl("defaultBlockMinutes").value = String(settings.blockMinutes || 60);
+  els.habitDeleteNameRequired.checked = settings.requireHabitNameToDelete === true;
+  document.querySelector("#habitDayShortcuts").checked = settings.habitDayShortcuts !== false;
   els.mapShowNotes.checked = settings.mapShowNotes !== false;
   syncAtlasSelects();
   OPTIONAL_SECTIONS.forEach((section) => {
@@ -1857,6 +1882,19 @@ function selectedHabitDate() {
   return els.habitDate.value || todayKey();
 }
 
+function handleHabitDayShortcut(event) {
+  if (state.appView !== "habits" || state.settings.habitDayShortcuts === false
+    || !["ArrowLeft", "ArrowRight"].includes(event.key)
+    || event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  if (event.target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='combobox'], [role='slider'], [role='spinbutton']")) return;
+  if (document.querySelector("dialog[open], :popover-open, .modal-backdrop:not([hidden]), #studioDrawer.is-open")) return;
+  const day = new Date(selectedHabitDate() + "T12:00:00");
+  day.setDate(day.getDate() + (event.key === "ArrowLeft" ? -1 : 1));
+  event.preventDefault();
+  els.habitDate.value = dateKey(day);
+  els.habitDate.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function toggleHabit(habitId, key = selectedHabitDate()) {
   const habit = state.habits.find((item) => item.id === habitId);
   if (!habit) return;
@@ -1897,10 +1935,39 @@ function completeHabitsToday() {
   showToast(undo ? "Habit completion undone." : `All habits complete for ${key === todayKey() ? "today" : shortDate(key)}.`);
 }
 
-function deleteHabit(habitId) {
-  state.habits = state.habits.filter((habit) => habit.id !== habitId);
+function requestHabitDeletion(habit) {
+  const dialog = els.habitDeleteDialog;
+  dialog.dataset.habitId = habit.id;
+  document.querySelector("#habitDeleteTitle").textContent = `Delete "${habit.name}"?`;
+  const days = new Set(habit.completedDates || []).size;
+  const history = days ? `its history of ${days} checked-off ${days === 1 ? "day" : "days"}` : "its history";
+  document.querySelector("#habitDeleteCopy").textContent = `This permanently removes the habit, ${history}, and its streaks. This cannot be undone.`;
+  document.querySelector("#habitDeleteNameRow").hidden = state.settings.requireHabitNameToDelete !== true;
+  els.habitDeleteName.value = "";
+  syncHabitDeleteConfirmation();
+  dialog.showModal();
+}
+
+function syncHabitDeleteConfirmation() {
+  const habit = state.habits.find((item) => item.id === els.habitDeleteDialog.dataset.habitId);
+  els.confirmHabitDelete.disabled = !habit || (state.settings.requireHabitNameToDelete === true && els.habitDeleteName.value !== habit.name);
+}
+
+function confirmHabitDeletion() {
+  if (!els.habitDeleteDialog.open) return;
+  syncHabitDeleteConfirmation();
+  if (els.confirmHabitDelete.disabled) return;
+  const id = els.habitDeleteDialog.dataset.habitId;
+  els.habitDeleteDialog.close();
+  state.habits = state.habits.filter((item) => item.id !== id);
+  for (const [date, ids] of Object.entries(state.habitBulkCompletions)) {
+    if (!ids.includes(id)) continue;
+    state.habitBulkCompletions[date] = ids.filter((item) => item !== id);
+    if (!state.habitBulkCompletions[date].length) delete state.habitBulkCompletions[date];
+  }
   saveState();
   render();
+  els.habitInput.focus();
 }
 
 function nextHabitOrder() {
@@ -2594,6 +2661,7 @@ function render() {
   renderFinance();
   renderCalendar();
   renderTimeTracker();
+  if (appView === "time" && journalCalendar && !journalEl("journalView").hidden) renderJournalEntry();
   renderBrainBoard();
   renderStudio();
   syncAtlasSelects();
@@ -3006,7 +3074,9 @@ function renderHabits() {
       </div>
     `;
     card.querySelector('[data-action="toggle"]').addEventListener("click", () => toggleHabit(habit.id, selectedDate));
-    card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteHabit(habit.id));
+    const remove = card.querySelector('[data-action="delete"]');
+    remove.setAttribute("aria-label", `Delete habit: ${habit.name}`);
+    remove.addEventListener("click", () => requestHabitDeletion(habit));
     card.addEventListener("dragstart", (event) => {
       if (event.target.closest("button")) {
         event.preventDefault();
@@ -3235,8 +3305,9 @@ function renderTimeTracker() {
   els.idealDayLabel.textContent = `${seasonLabel} / ${weekdayName(state.timeScheduleDay)}`;
   els.timeScheduleDays.querySelectorAll("[data-schedule-day]").forEach((button) => {
     button.classList.toggle("active", Number(button.dataset.scheduleDay) === state.timeScheduleDay);
+    button.setAttribute("aria-pressed", String(Number(button.dataset.scheduleDay) === state.timeScheduleDay));
   });
-  const visibleWindow = sleepBlock
+  const visibleWindow = sleepBlock && minutesFromTime(sleepBlock.end) < minutesFromTime(sleepBlock.start)
     ? { start: minutesFromTime(sleepBlock.end), end: minutesFromTime(sleepBlock.start) }
     : { start: 0, end: 1440 };
   renderSleepRoutine(sleepBlock);
@@ -3257,19 +3328,13 @@ function saveSleepRoutine(event) {
   const start = els.sleepStart.value;
   const end = els.wakeTime.value;
   if (!start || !end) return;
-  if (minutesFromTime(end) >= minutesFromTime(start)) {
-    showToast("Sleep should run from night into the next morning.");
+  if (end === start) {
+    showToast("Choose different sleep and wake times.");
     return;
   }
   rememberScheduleState();
-  upsertSleepLog(start, end);
-  const days = [...Array(7).keys()];
-  state.timeBlocks = state.timeBlocks.filter((block) => !(
-    block.kind === "ideal"
-    && block.season === state.timeScheduleSeason
-    && isSleepBoundary(block)
-    && daysForTimeBlock(block).some((day) => days.includes(day))
-  ));
+  const days = sleepPlanDays();
+  removeSelectedSleepDays(days);
   state.timeBlocks.push({
     id: createId(),
     name: "Sleep",
@@ -3280,7 +3345,7 @@ function saveSleepRoutine(event) {
     end,
     date: null,
     season: state.timeScheduleSeason,
-    dayOfWeek: 0,
+    dayOfWeek: days[0],
     daysOfWeek: days,
     createdAt: Date.now()
   });
@@ -3290,29 +3355,21 @@ function saveSleepRoutine(event) {
 
 function clearSleepRoutine() {
   rememberScheduleState();
-  state.timeBlocks = state.timeBlocks.filter((block) => !(block.kind === "ideal"
-    && block.season === state.timeScheduleSeason
-    && isSleepBoundary(block)
-  ));
+  removeSelectedSleepDays(sleepPlanDays());
   saveState();
   renderTimeTracker();
 }
 
-function upsertSleepLog(start, end) {
-  const today = todayKey();
-  const existing = state.sleepLogs.find((log) => log.date === today && log.season === state.timeScheduleSeason);
-  const data = {
-    date: today,
-    season: state.timeScheduleSeason,
-    start,
-    end,
-    createdAt: Date.now()
-  };
-  if (existing) {
-    Object.assign(existing, data);
-  } else {
-    state.sleepLogs.push({ id: createId(), ...data });
-  }
+function sleepPlanDays() {
+  return { weekdays: [1,2,3,4,5], weekend: [0,6], all: [0,1,2,3,4,5,6] }[journalEl("sleepApplyDays").value] || [state.timeScheduleDay];
+}
+
+function removeSelectedSleepDays(selectedDays) {
+  state.timeBlocks = state.timeBlocks.flatMap((block) => {
+    if (block.kind !== "ideal" || block.season !== state.timeScheduleSeason || !isSleepBoundary(block)) return [block];
+    const days = daysForTimeBlock(block).filter((day) => !selectedDays.includes(day));
+    return days.length ? [{ ...block, daysOfWeek: days, dayOfWeek: days[0] }] : [];
+  });
 }
 
 function openSleepTrendModal() {
@@ -3360,7 +3417,11 @@ function renderSleepTrendChart() {
 }
 
 function sleepTrendLogs() {
-  const logs = [...state.sleepLogs].sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = new Map(state.sleepLogs.map((log) => [log.date, log]));
+  for (const [date, entry] of Object.entries(state.journalEntries || {})) {
+    if (entry?.bed && entry.wake) byDate.set(date, { date, start: entry.bed, end: entry.wake });
+  }
+  const logs = [...byDate.values()].filter(log => log.date <= todayKey()).sort((a, b) => a.date.localeCompare(b.date));
   if (sleepTrendRange === "all") return logs;
   const days = sleepTrendRange === "month" ? 30 : 7;
   const start = new Date(`${todayKey()}T00:00`);
@@ -3413,12 +3474,7 @@ function renderTimeLane(lane, entries, visibleWindow) {
     }
   });
   arrangeInstantTimeBlocks(renderedBlocks);
-  lane.onclick = (event) => {
-    if (event.target.closest(".time-block")) return;
-    const rect = lane.getBoundingClientRect();
-    const start = snapTimeMinutes(visibleWindow.start + ((event.clientY - rect.top) / rect.height) * visibleMinutes);
-    beginNewTimeBlock(start);
-  };
+  bindBlockSelection(lane, visibleWindow);
 }
 
 function arrangeInstantTimeBlocks(renderedBlocks) {
@@ -3554,10 +3610,12 @@ function stopTimeBlockDrag() {
   renderTimeTracker();
 }
 
-function beginNewTimeBlock(start = 480) {
+function beginNewTimeBlock(start = 480, end = Math.min(1440, start + (state.settings.blockMinutes || 60))) {
   resetTimeBlockForm();
   els.timeBlockStart.value = timeValueFromMinutes(Math.min(1435, start));
-  els.timeBlockEnd.value = timeValueFromMinutes(Math.min(1435, start + 60));
+  els.timeBlockEnd.value = end === 1440 ? "00:00" : timeValueFromMinutes(end);
+  document.querySelector("#blockDialogTitle").textContent = "New block";
+  document.querySelector("#blockDialog").showModal();
   els.timeBlockName.focus();
 }
 
@@ -3604,7 +3662,7 @@ function saveTimeBlock(event) {
     state.timeBlocks.push({ id: createId(), ...data, createdAt: Date.now() });
   }
   saveState();
-  resetTimeBlockForm();
+  document.querySelector("#blockDialog").close();
   renderTimeTracker();
 }
 
@@ -3620,6 +3678,8 @@ function openTimeBlockEditor(id) {
   timeBlockDraftDays = daysForTimeBlock(block);
   renderTimeBlockRepeatDays();
   els.timeBlockSave.textContent = "Save block";
+  document.querySelector("#blockDialogTitle").textContent = "Edit block";
+  document.querySelector("#blockDialog").showModal();
   els.timeBlockCancel.hidden = false;
   els.timeBlockName.focus();
 }
@@ -3633,7 +3693,7 @@ function resetTimeBlockForm() {
   timeBlockDraftDays = [state.timeScheduleDay];
   renderTimeBlockRepeatDays();
   els.timeBlockSave.textContent = "Add block";
-  els.timeBlockCancel.hidden = true;
+  els.timeBlockCancel.hidden = false;
   updateTimeBlockEndVisibility();
 }
 
@@ -3655,7 +3715,7 @@ function rememberScheduleState() {
 
 function handleScheduleUndoShortcut(event) {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z" || event.shiftKey) return;
-  if (state.appView !== "time") return;
+  if (state.appView !== "time" || !journalEl("journalView").hidden || journalEl("blockDialog").open) return;
   if (event.target.closest("input, textarea, select, [contenteditable='true']")) return;
   const previous = scheduleUndoStack.pop();
   if (!previous) {
@@ -3683,7 +3743,7 @@ function blockRepeatsOn(block, day) {
 }
 
 function isSleepBoundary(block) {
-  return block.category === "sleep" && minutesFromTime(block.end) < minutesFromTime(block.start);
+  return block.category === "sleep" && block.end !== block.start;
 }
 
 function renderTimeBlockRepeatDays() {
