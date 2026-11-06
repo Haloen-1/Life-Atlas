@@ -1,10 +1,11 @@
-const CACHE_NAME = "life-atlas-v10-habit-shortcuts";
+const CACHE_NAME = "life-atlas-v12-habit-types";
 const APP_FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./journal.js",
+  "./habits.js",
   "./controls.js",
   "./controls.css",
   "./area-map.js",

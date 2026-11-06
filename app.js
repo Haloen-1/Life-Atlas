@@ -608,6 +608,8 @@ setupWorkspaceResize(els.studioDrawer, document.querySelector("#workspaceResize"
   (size) => { state.settings.workspaceSize = size; saveState(); });
 setupPointerReordering();
 setupCustomSelects();
+setupHabitEditor();
+setupHabitTypes();
 setupJournal();
 
 function setupPriorityPanelDrag() {
@@ -713,6 +715,7 @@ function applyAppSettings() {
   journalEl("defaultBlockMinutes").value = String(settings.blockMinutes || 60);
   els.habitDeleteNameRequired.checked = settings.requireHabitNameToDelete === true;
   document.querySelector("#habitDayShortcuts").checked = settings.habitDayShortcuts !== false;
+  document.querySelector("#workspaceHabitViewAll").checked = settings.habitsViewAll === true;
   els.mapShowNotes.checked = settings.mapShowNotes !== false;
   syncAtlasSelects();
   OPTIONAL_SECTIONS.forEach((section) => {
@@ -1130,6 +1133,7 @@ function loadState() {
 }
 
 function ensureStateShape() {
+  if (!state.habitBulkEventIds || typeof state.habitBulkEventIds !== "object") state.habitBulkEventIds = {};
   const batches = state.habitBulkCompletions;
   state.habitBulkCompletions = Object.fromEntries(Object.entries(batches && typeof batches === "object" ? batches : {})
     .filter(([key, ids]) => /^\d{4}-\d{2}-\d{2}$/.test(key) && Array.isArray(ids) && ids.length)
@@ -1170,6 +1174,10 @@ function ensureStateShape() {
   state.habits.forEach((habit) => {
     if (!Array.isArray(habit.completedDates)) habit.completedDates = [];
     habit.days = normalizeHabitDays(habit.days);
+    if (Array.isArray(habit.scheduleHistory)) {
+      habit.scheduleHistory = habit.scheduleHistory.filter(item => item && /^\d{4}-\d{2}-\d{2}$/.test(item.from) && Array.isArray(item.days))
+        .map(item => ({ ...item, days: normalizeHabitDays(item.days) })).sort((a, b) => a.from.localeCompare(b.from));
+    }
     if (!habit.createdAt) habit.createdAt = Date.now();
     if (typeof habit.order !== "number") habit.order = habit.createdAt || Date.now();
   });
@@ -1861,10 +1869,13 @@ function addHabit(event) {
   event.preventDefault();
   const name = els.habitInput.value.trim();
   if (!name) return;
+  const timing = readHabitTiming("habitNew");
+  if (!timing) return;
 
   state.habits.push({
     id: createId(),
     name,
+    ...timing,
     completedDates: [],
     days: [...habitDraftDays],
     order: nextHabitOrder(),
@@ -1872,6 +1883,11 @@ function addHabit(event) {
   });
 
   els.habitInput.value = "";
+  document.querySelector("#habitNewMode").value = "weekdays";
+  document.querySelector("#habitNewTime").value = "";
+  document.querySelector("#habitNewEvery").value = "1";
+  document.querySelector("#habitNewUnit").value = "day";
+  syncHabitTimingFields("habitNew");
   habitDraftDays = [0, 1, 2, 3, 4, 5, 6];
   document.querySelectorAll("[data-habit-day]").forEach((button) => button.setAttribute("aria-pressed", "true"));
   saveState();
@@ -1900,13 +1916,11 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
   if (!habit) return;
 
   habit.completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
-  if (!isHabitScheduled(habit, key) && !habit.completedDates.includes(key)) return;
-  if (habit.completedDates.includes(key)) {
-    habit.completedDates = habit.completedDates.filter((date) => date !== key);
-  } else {
-    habit.completedDates.push(key);
+  if (habitCanComplete(habit, key)) {
+    recordHabitCompletion(habit, key);
     if (key === todayKey()) celebrate();
-  }
+  } else if (habit.completedDates.includes(key)) removeHabitCompletion(habit, key);
+  else return;
 
   saveState();
   render();
@@ -1916,23 +1930,107 @@ function completeHabitsToday() {
   const key = selectedHabitDate();
   const scheduled = state.habits.filter((habit) => isHabitScheduled(habit, key));
   const previousBatch = state.habitBulkCompletions[key];
-  const pending = scheduled.filter((habit) => !(habit.completedDates || []).includes(key));
+  const pending = state.habits.filter((habit) => habitCanComplete(habit, key));
   if (!scheduled.length && !previousBatch) return;
-  const undo = Boolean(previousBatch) || !pending.length;
+  const newIntervalDue = pending.some(habit => habitRule(habit, key).mode === "interval");
+  const undo = Boolean(previousBatch) && !newIntervalDue || !pending.length;
   if (undo) {
     const ids = new Set(previousBatch || scheduled.map((habit) => habit.id));
     state.habits.forEach((habit) => {
-      if (ids.has(habit.id)) habit.completedDates = (habit.completedDates || []).filter((date) => date !== key);
+      if (ids.has(habit.id)) removeHabitCompletion(habit, key, state.habitBulkEventIds[key]?.[habit.id]);
     });
     delete state.habitBulkCompletions[key];
+    delete state.habitBulkEventIds[key];
   } else {
     state.habitBulkCompletions[key] = pending.map((habit) => habit.id);
-    pending.forEach((habit) => { habit.completedDates = [...(habit.completedDates || []), key]; });
+    state.habitBulkEventIds[key] = {};
+    pending.forEach((habit) => {
+      const eventId = recordHabitCompletion(habit, key);
+      if (eventId) state.habitBulkEventIds[key][habit.id] = eventId;
+    });
   }
   saveState();
   render();
   if (!undo) celebrate();
   showToast(undo ? "Habit completion undone." : `All habits complete for ${key === todayKey() ? "today" : shortDate(key)}.`);
+}
+
+function setupHabitEditor() {
+  const days = document.querySelector("#habitEditDays");
+  for (let day = 0; day < 7; day++) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.day = day;
+    button.textContent = weekdayName(day).slice(0, 1);
+    button.setAttribute("aria-label", weekdayName(day));
+    button.addEventListener("click", () => button.setAttribute("aria-pressed", String(button.getAttribute("aria-pressed") !== "true")));
+    days.append(button);
+  }
+  document.querySelector("#workspaceHabits").addEventListener("click", () => {
+    if (!state.habits.length) { showToast("Add a habit first."); return; }
+    openHabitEditor(state.habits[0].id);
+  });
+  document.querySelector("#habitEditSelect").addEventListener("change", loadHabitEditDraft);
+  document.querySelector("#habitEditCancel").addEventListener("click", () => document.querySelector("#habitEditDialog").close());
+  document.querySelector("#habitEditForm").addEventListener("submit", saveHabitEdits);
+}
+
+function openHabitEditor(id) {
+  const select = document.querySelector("#habitEditSelect");
+  select.replaceChildren(...state.habits.map(habit => new Option(habit.name, habit.id)));
+  select.value = id;
+  loadHabitEditDraft();
+  document.querySelector("#habitEditDialog").showModal();
+  document.querySelector("#habitEditName").focus();
+}
+
+function loadHabitEditDraft() {
+  const habit = state.habits.find(item => item.id === document.querySelector("#habitEditSelect").value);
+  if (!habit) return;
+  document.querySelector("#habitEditName").value = habit.name;
+  const timing = habitRule(habit);
+  document.querySelector("#habitEditMode").value = timing.mode;
+  document.querySelector("#habitEditEvery").value = timing.every;
+  document.querySelector("#habitEditUnit").value = timing.unit;
+  document.querySelector("#habitEditTime").value = habit.time || "";
+  syncHabitTimingFields("habitEdit");
+  document.querySelectorAll("#habitEditDays button").forEach(button => button.setAttribute("aria-pressed", String(habit.days.includes(Number(button.dataset.day)))));
+  document.querySelector("#habitEditEffective").textContent = "Repeat changes: from tomorrow";
+  document.querySelector("#habitEditError").textContent = "";
+  syncAtlasSelects();
+}
+
+function saveHabitEdits(event) {
+  event.preventDefault();
+  const habit = state.habits.find(item => item.id === document.querySelector("#habitEditSelect").value);
+  if (!habit) return;
+  const name = document.querySelector("#habitEditName").value.trim();
+  const timing = readHabitTiming("habitEdit");
+  if (!timing) return;
+  const days = [...document.querySelectorAll('#habitEditDays [aria-pressed="true"]')].map(button => Number(button.dataset.day));
+  if (!name || timing.mode === "weekdays" && !days.length) {
+    document.querySelector("#habitEditError").textContent = !name ? "Enter a habit name." : "Choose at least one repeat day.";
+    return;
+  }
+  const previousRule = habitRule(habit);
+  const nextDays = days.length ? days : previousRule.days;
+  if (JSON.stringify(nextDays) !== JSON.stringify(habit.days) || timing.mode !== previousRule.mode
+    || timing.every !== previousRule.every || timing.unit !== previousRule.unit) {
+    const tomorrow = new Date(todayKey() + "T12:00:00");
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const from = dateKey(tomorrow);
+    const history = habit.scheduleHistory?.length ? habit.scheduleHistory : [{ ...previousRule, from: "0001-01-01" }];
+    const next = { mode: timing.mode, every: timing.every, unit: timing.unit, days: nextDays };
+    habit.scheduleHistory = [...history.filter(item => item.from < from), { ...next, from }];
+    Object.assign(habit, next);
+  }
+  if (timing.time || habit.time) habit.time = timing.time;
+  habit.name = name;
+  saveState();
+  document.querySelector("#habitEditDialog").close();
+  render();
+  els.habitList.querySelector(`[data-habit-id="${CSS.escape(habit.id)}"] [data-action="edit"]`)?.focus();
+  showToast("Habit updated.");
 }
 
 function requestHabitDeletion(habit) {
@@ -3039,41 +3137,59 @@ function renderHabits() {
   const selectedDate = selectedHabitDate();
   const selectedLabel = selectedDate === todayKey() ? "today" : shortDate(selectedDate);
   const scheduled = state.habits.filter((habit) => isHabitScheduled(habit, selectedDate));
-  const allDone = scheduled.length > 0 && scheduled.every((habit) => (habit.completedDates || []).includes(selectedDate));
+  const allDone = scheduled.length > 0 && scheduled.every((habit) => !habitCanComplete(habit, selectedDate));
   const hasBatch = Boolean(state.habitBulkCompletions[selectedDate]);
+  const newIntervalDue = state.habits.some(habit => habitRule(habit, selectedDate).mode === "interval" && habitCanComplete(habit, selectedDate));
   els.completeHabitsToday.hidden = !state.habits.length;
   els.completeHabitsToday.disabled = !scheduled.length && !hasBatch;
   els.completeHabitsToday.classList.toggle("all-done", allDone);
-  els.completeHabitsToday.textContent = hasBatch ? "Undo complete all" : allDone ? "Uncheck all" : scheduled.length ? (selectedDate === todayKey() ? "Complete all today" : "Complete all for this day") : "No habits scheduled";
+  els.completeHabitsToday.textContent = hasBatch && !newIntervalDue ? "Undo complete all" : allDone ? "Uncheck all" : scheduled.length ? (selectedDate === todayKey() ? "Complete all today" : "Complete all for this day") : "No habits scheduled";
+  const viewAll = state.settings.habitsViewAll === true;
+  const viewButton = document.querySelector("#habitViewAll");
+  viewButton.setAttribute("aria-pressed", String(viewAll));
+  viewButton.textContent = viewAll ? "Show due" : "View all";
+  viewButton.hidden = !state.habits.length;
+  els.habitList.dataset.readiness = state.habits.map(h => h.id + ":" + habitCanComplete(h,selectedDate)).join(",");
 
   if (!state.habits.length) {
     els.habitList.innerHTML = `<div class="empty">No habits yet. Add one daily rhythm to track.</div>`;
     return;
   }
 
-  const orderedHabits = [...state.habits].sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt));
+  const orderedHabits = state.habits.filter(habit => viewAll || habitIsVisible(habit, selectedDate))
+    .sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt));
+  if (!orderedHabits.length) els.habitList.innerHTML = '<div class="empty">No habits due for this day.</div>';
   orderedHabits.forEach((habit, index) => {
     const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
     const done = completedDates.includes(selectedDate);
     const scheduled = isHabitScheduled(habit, selectedDate);
-    const currentStreak = habitStreak(habit);
-    const bestStreak = bestHabitStreak(habit);
+    const interval = habitRule(habit, selectedDate).mode === "interval";
+    const canComplete = habitCanComplete(habit, selectedDate);
+    const status = interval ? intervalHabitStatus(habit, selectedDate) : null;
+    const progress = interval ? habitCompletionRecords(habit).length + " check-ins"
+      : "Current " + habitStreak(habit) + " / Best " + bestHabitStreak(habit);
+    const statusLabel = interval ? (canComplete ? "Ready" : "Returns " + formatDateTime(status.dueAt))
+      : done ? "Done " + selectedLabel : scheduled ? "Not marked " + selectedLabel : "Day off";
     const card = document.createElement("article");
-    card.className = `habit-card${done ? " done" : ""}${!scheduled ? " rest-day" : ""}`;
+    card.className = `habit-card${done && !canComplete ? " done" : ""}${!scheduled ? " rest-day" : ""}`;
     card.draggable = true;
     card.dataset.habitId = habit.id;
     card.innerHTML = `
       <div>
         <strong>${escapeHtml(habit.name)}</strong>
-        <span>${done ? `Done ${selectedLabel}` : scheduled ? `Not marked ${selectedLabel}` : "Day off"} / Current ${currentStreak} / Best ${bestStreak}</span>
-        <small class="habit-schedule-label">${habitScheduleLabel(habit)}</small>
+        <span>${escapeHtml(statusLabel)} / ${escapeHtml(progress)}</span>
+        <small class="habit-schedule-label">${habitScheduleLabel(habit, selectedDate)}</small>
       </div>
       <div class="row-actions">
-        <button type="button" data-action="toggle" ${!scheduled && !done ? "disabled" : ""}>${done ? "Done" : scheduled ? "Check" : "Day off"}</button>
+        <button type="button" data-action="toggle" ${!canComplete && !done ? "disabled" : ""}>${canComplete ? "Check" : done ? (interval ? "Undo latest" : "Done") : interval ? "Waiting" : "Day off"}</button>
+        <button type="button" data-action="edit">Edit</button>
         <button type="button" data-action="delete">x</button>
       </div>
     `;
     card.querySelector('[data-action="toggle"]').addEventListener("click", () => toggleHabit(habit.id, selectedDate));
+    const edit = card.querySelector('[data-action="edit"]');
+    edit.setAttribute("aria-label", `Edit habit: ${habit.name}`);
+    edit.addEventListener("click", () => openHabitEditor(habit.id));
     const remove = card.querySelector('[data-action="delete"]');
     remove.setAttribute("aria-label", `Delete habit: ${habit.name}`);
     remove.addEventListener("click", () => requestHabitDeletion(habit));
@@ -4133,18 +4249,23 @@ function normalizeHabitDays(days) {
 }
 
 function isHabitScheduled(habit, key) {
-  return normalizeHabitDays(habit.days).includes(new Date(`${key}T12:00:00`).getDay());
+  if (habitRule(habit, key).mode === "interval") {
+    const status = intervalHabitStatus(habit, key);
+    return status.ready || status.done;
+  }
+  return habitRule(habit, key).days.includes(new Date(`${key}T12:00:00`).getDay());
 }
 
-function habitScheduleLabel(habit) {
-  const days = normalizeHabitDays(habit.days);
-  if (days.length === 7) return "Every day";
-  return days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
+function habitScheduleLabel(habit, key = todayKey()) {
+  const rule = habitRule(habit, key);
+  if (rule.mode === "interval") return `Returns ${rule.every} ${rule.unit}${rule.every === 1 ? "" : "s"} after completion`;
+  const label = rule.days.length === 7 ? "Every day" : rule.days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
+  return label + (habit.time ? " / " + formatTime(habit.time) : "");
 }
 
 function previousHabitDate(habit, key) {
   const cursor = new Date(`${key}T12:00:00`);
-  for (let i = 0; i < 7; i += 1) {
+  for (let i = 0; i < 7 * ((habit.scheduleHistory?.length || 0) + 1); i += 1) {
     cursor.setDate(cursor.getDate() - 1);
     if (isHabitScheduled(habit, dateKey(cursor))) return dateKey(cursor);
   }
@@ -4178,6 +4299,7 @@ function bestHabitStreak(habit) {
 
 function isHabitMissedOnDate(habit, key) {
   if (key >= todayKey() || !habitStartedByDate(habit, key) || !isHabitScheduled(habit, key)) return false;
+  if (habitRule(habit, key).mode === "interval" && dateKey(new Date(intervalHabitStatus(habit, key).dueAt)) !== key) return false;
   return !(habit.completedDates || []).includes(key);
 }
 
