@@ -1919,7 +1919,7 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
   if (habitCanComplete(habit, key)) {
     recordHabitCompletion(habit, key);
     if (key === todayKey()) celebrate();
-  } else if (habit.completedDates.includes(key)) removeHabitCompletion(habit, key);
+  } else if (habit.completedDates.includes(key) || habitRule(habit, key).mode === "interval" && intervalHabitStatus(habit, key).done) removeHabitCompletion(habit, key);
   else return;
 
   saveState();
@@ -3161,11 +3161,11 @@ function renderHabits() {
   if (!orderedHabits.length) els.habitList.innerHTML = '<div class="empty">No habits due for this day.</div>';
   orderedHabits.forEach((habit, index) => {
     const completedDates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
-    const done = completedDates.includes(selectedDate);
     const scheduled = isHabitScheduled(habit, selectedDate);
     const interval = habitRule(habit, selectedDate).mode === "interval";
     const canComplete = habitCanComplete(habit, selectedDate);
     const status = interval ? intervalHabitStatus(habit, selectedDate) : null;
+    const done = interval ? status.done : completedDates.includes(selectedDate);
     const progress = interval ? habitCompletionRecords(habit).length + " check-ins"
       : "Current " + habitStreak(habit) + " / Best " + bestHabitStreak(habit);
     const statusLabel = interval ? (canComplete ? "Ready" : "Returns " + formatDateTime(status.dueAt))
@@ -4258,7 +4258,7 @@ function isHabitScheduled(habit, key) {
 
 function habitScheduleLabel(habit, key = todayKey()) {
   const rule = habitRule(habit, key);
-  if (rule.mode === "interval") return `Returns ${rule.every} ${rule.unit}${rule.every === 1 ? "" : "s"} after completion`;
+  if (rule.mode === "interval") return `Every ${rule.every} ${rule.unit}${rule.every === 1 ? "" : "s"}`;
   const label = rule.days.length === 7 ? "Every day" : rule.days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
   return label + (habit.time ? " / " + formatTime(habit.time) : "");
 }

@@ -484,7 +484,7 @@ let browser;
   assert.equal(await page.locator(".habit-card").count(),0,"interval habit disappears after completion");
   const intervalId=await page.evaluate(()=>state.habits[0].id);
   await page.reload();
-  assert.equal(await page.locator(".habit-card").count(),0,"cooldown persists on reload");
+  assert.equal(await page.locator(".habit-card").count(),0,"completed interval stays hidden on reload");
   await page.locator("#habitViewAll").click();
   assert.match(await page.locator(".habit-card").innerText(), /Returns/);
   await page.locator(".habit-card [data-action=toggle]").click();
@@ -492,7 +492,7 @@ let browser;
   await page.locator("#habitViewAll").click();
   assert.equal(await page.locator(".habit-card").count(),1,"undo makes it due again");
   await page.locator("#completeHabitsToday").click();
-  assert.equal(await page.locator(".habit-card").count(),0,"bulk completion also starts cooldown");
+  assert.equal(await page.locator(".habit-card").count(),0,"bulk completion fills the current interval");
   await page.locator("#completeHabitsToday").click();
   assert.equal(await page.locator(".habit-card").count(),1,"bulk undo restores due habit");
   await page.locator(".habit-card [data-action=toggle]").click();
@@ -561,6 +561,43 @@ let browser;
     } finally { state.habits=saved.habits; state.habitBulkCompletions=saved.batches; state.habitBulkEventIds=saved.events; saveState(); render(); }
   });
   assert.deepEqual(roundTrips,{two:2,one:1,original:true,ready:true},"new interval batch and undo retain earlier completions");
+  const fixedIntervals = await page.evaluate(() => {
+    const at = value => new Date(value).getTime();
+    const base = {id:"fixed",mode:"interval",every:6,unit:"hour",days:[0,1,2,3,4,5,6],
+      createdAt:at("2026-11-01T09:00:00"),completedDates:[],completionEvents:[]};
+    const status = (habit, time) => intervalHabitStatus(habit,dateKey(new Date(time)),at(time));
+    const complete = (habit,time,id) => {
+      const date=dateKey(new Date(time));
+      habit.completionEvents.push({id,date,at:at(time)});
+      if(!habit.completedDates.includes(date)) habit.completedDates.push(date);
+    };
+    complete(base,"2026-11-01T14:50:00","first");
+    const lateNext=status(base,"2026-11-01T14:59:59");
+    const firstBoundary=status(base,"2026-11-01T15:00:00");
+    complete(base,"2026-11-01T15:15:00","second");
+    const secondNext=status(base,"2026-11-01T20:59:59");
+    const secondBoundary=status(base,"2026-11-01T21:00:00");
+    const skipped=status(base,"2026-11-03T10:00:00");
+    const weekly={...base,every:1,unit:"week",completedDates:[],completionEvents:[]};
+    complete(weekly,"2026-11-02T12:00:00","week");
+    const week=status(weekly,"2026-11-03T12:00:00");
+    removeHabitCompletion(weekly,"2026-11-03");
+    const past={...base,every:1,unit:"hour",completedDates:[],completionEvents:[]};
+    recordHabitCompletion(past,"2026-11-02");
+    const pastDone=intervalHabitStatus(past,"2026-11-02",at("2026-11-04T12:00:00")).done;
+    return {
+      lateNext:lateNext.dueAt===at("2026-11-01T15:00:00")&&!lateNext.ready,
+      firstBoundary:firstBoundary.ready,
+      secondNext:secondNext.dueAt===at("2026-11-01T21:00:00")&&!secondNext.ready,
+      secondBoundary:secondBoundary.ready,
+      skipped:skipped.ready&&skipped.cycleStart===at("2026-11-03T09:00:00")&&base.completionEvents.length===2,
+      weekly:week.done&&!week.ready&&week.dueAt===at("2026-11-08T09:00:00"),
+      undo:weekly.completionEvents.length===0&&weekly.completedDates.length===0,
+      pastDone
+    };
+  });
+  assert.deepEqual(fixedIntervals,{lateNext:true,firstBoundary:true,secondNext:true,secondBoundary:true,skipped:true,weekly:true,undo:true,pastDone:true},
+    "fixed cadence never shifts after late completion, handles skipped windows, long intervals, undo and backfill");
   assert.deepEqual(errors, [], "no app errors");
   console.log("PASS: interval habits, weekday filtering, timing edits, precise undo, history, and existing desktop/mobile interactions.");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {

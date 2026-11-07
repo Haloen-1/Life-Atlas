@@ -25,12 +25,16 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
   const today = dateKey(new Date(now));
   const cutoff = key === today ? now : new Date(key + "T23:59:59.999").getTime();
   const records = habitCompletionRecords(habit).filter(event => event.at <= cutoff);
-  const last = records.at(-1);
   const duration = rule.every * {minute:60000,hour:3600000,day:86400000,week:604800000}[rule.unit];
   const initial = Math.max(habit.createdAt || now, rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0);
-  const dueAt = last ? Math.max(initial, last.at + duration) : initial;
-  const done = records.some(event => event.date === key);
-  return { dueAt, ready: dueAt <= cutoff && (key === today || !done), done };
+  // Completion fills one fixed window; it never moves the next recurrence.
+  const cycle = Math.max(0, Math.floor((cutoff - initial) / duration));
+  const cycleStart = initial + cycle * duration;
+  const cycleEnd = cycleStart + duration;
+  const completion = records.filter(event => event.at >= cycleStart && event.at < cycleEnd).at(-1);
+  const done = Boolean(completion);
+  const dueAt = done ? cycleEnd : cycleStart;
+  return { dueAt, ready: cutoff >= cycleStart && !done, done, cycleStart, cycleEnd, completion };
 }
 
 function habitIsVisible(habit, key) {
@@ -47,13 +51,21 @@ function recordHabitCompletion(habit, key) {
   habit.completedDates ||= [];
   if (!habit.completedDates.includes(key)) habit.completedDates.push(key);
   if (habitRule(habit, key).mode !== "interval") return null;
-  const at = key === todayKey() ? Date.now() : new Date(key + "T" + (habit.time || "12:00") + ":00").getTime();
+  const status = intervalHabitStatus(habit, key);
+  const requested = new Date(key + "T" + (habit.time || "12:00") + ":00").getTime();
+  const at = key === todayKey() ? Date.now() : Math.max(status.cycleStart, Math.min(status.cycleEnd - 1, requested));
   const event = {id:createId(),date:key,at};
   (habit.completionEvents ||= []).push(event);
   return event.id;
 }
 
 function removeHabitCompletion(habit, key, eventId) {
+  if (!eventId && habitRule(habit, key).mode === "interval") {
+    const completion = intervalHabitStatus(habit, key).completion;
+    if (!completion) return;
+    key = completion.date;
+    eventId = completion.id;
+  }
   const records = habitCompletionRecords(habit).filter(event => event.date === key);
   const target = eventId ? records.find(event => event.id === eventId) : records.at(-1);
   if (eventId && !target) return;
