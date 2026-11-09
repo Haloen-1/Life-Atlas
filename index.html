@@ -470,6 +470,7 @@
               <button type="submit">Add</button>
               <div class="habit-timing-fields">
                 <label>Repeat <select id="habitNewMode"><option value="weekdays">On weekdays</option><option value="interval">Fixed interval</option></select></label>
+                <label id="habitNewCadenceRow" hidden>Returns <select id="habitNewCadence"><option value="duration">Every interval</option><option value="days">Selected days at midnight</option></select></label>
                 <div class="habit-delay" id="habitNewDelay" hidden>
                   <label>Every <input id="habitNewEvery" type="number" min="1" max="999" value="1" /></label>
                   <label>Unit <select id="habitNewUnit"><option value="minute">Minutes</option><option value="hour">Hours</option><option value="day" selected>Days</option><option value="week">Weeks</option></select></label>
@@ -693,6 +694,7 @@
         <label>Habit <select id="habitEditSelect"></select></label>
         <label>Name <input id="habitEditName" type="text" required autocomplete="off" /></label>
         <label>Repeat <select id="habitEditMode"><option value="weekdays">On weekdays</option><option value="interval">Fixed interval</option></select></label>
+        <label id="habitEditCadenceRow" hidden>Returns <select id="habitEditCadence"><option value="duration">Every interval</option><option value="days">Selected days at midnight</option></select></label>
         <div class="habit-delay" id="habitEditDelay" hidden>
           <label>Every <input id="habitEditEvery" type="number" min="1" max="999" value="1" /></label>
           <label>Unit <select id="habitEditUnit"><option value="minute">Minutes</option><option value="hour">Hours</option><option value="day" selected>Days</option><option value="week">Weeks</option></select></label>

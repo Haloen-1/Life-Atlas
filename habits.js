@@ -7,6 +7,7 @@ function habitRule(habit, key) {
   const source = entry || habit;
   return {
     mode: source.mode === "interval" ? "interval" : "weekdays",
+    cadence: source.cadence === "days" ? "days" : "duration",
     days: normalizeHabitDays(source.days),
     every: Number.isInteger(source.every) && source.every > 0 ? Math.min(999, source.every) : 1,
     unit: ["minute", "hour", "day", "week"].includes(source.unit) ? source.unit : "day",
@@ -28,6 +29,21 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
   const today = dateKey(new Date(now));
   const cutoff = key === today ? now : new Date(key + "T23:59:59.999").getTime();
   const records = habitCompletionRecords(habit).filter(event => event.at <= cutoff);
+  if (rule.cadence === "days") {
+    const start = new Date(key + "T00:00:00");
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    const cycleStart = start.getTime(), cycleEnd = end.getTime();
+    const scheduled = rule.days.includes(start.getDay());
+    const completion = scheduled ? records.filter(event => event.at >= cycleStart && event.at < cycleEnd).at(-1) : undefined;
+    const done = Boolean(completion);
+    const next = new Date(start);
+    if (!scheduled || done) {
+      do { next.setDate(next.getDate() + 1); } while (!rule.days.includes(next.getDay()));
+    }
+    return {dueAt:next.getTime(), ready:scheduled && !done && cutoff >= cycleStart,
+      done, cycleStart, cycleEnd, completion};
+  }
   const duration = rule.every * {minute:60000,hour:3600000,day:86400000,week:604800000}[rule.unit];
   const initial = Math.max(habit.createdAt || now, rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0);
   // Completion fills one fixed window; it never moves the next recurrence.
@@ -89,20 +105,23 @@ function setHabitViewAll(value) {
 
 function syncHabitTimingFields(prefix) {
   const interval = document.querySelector("#" + prefix + "Mode").value === "interval";
-  document.querySelector("#" + prefix + "Delay").hidden = !interval;
+  const selectedDays = document.querySelector("#" + prefix + "Cadence").value === "days";
+  document.querySelector("#" + prefix + "CadenceRow").hidden = !interval;
+  document.querySelector("#" + prefix + "Delay").hidden = !interval || selectedDays;
   const amount = document.querySelector("#" + prefix + "Every");
-  amount.disabled = !interval;
-  amount.required = interval;
+  amount.disabled = !interval || selectedDays;
+  amount.required = interval && !selectedDays;
   document.querySelector("#" + prefix + "TimeRow").hidden = interval;
   const weekdays = prefix === "habitNew" ? document.querySelector("#habitRepeatDays") : document.querySelector("#habitEditDays");
-  weekdays.closest("fieldset").hidden = interval;
+  weekdays.closest("fieldset").hidden = interval && !selectedDays;
 }
 
 function readHabitTiming(prefix) {
   const mode = document.querySelector("#" + prefix + "Mode").value;
   const every = document.querySelector("#" + prefix + "Every").valueAsNumber;
-  if (mode === "interval" && (!Number.isInteger(every) || every < 1 || every > 999)) return null;
-  return {mode, every: Number.isInteger(every) && every > 0 ? every : 1,
+  const cadence = document.querySelector("#" + prefix + "Cadence").value;
+  if (mode === "interval" && cadence !== "days" && (!Number.isInteger(every) || every < 1 || every > 999)) return null;
+  return {mode, cadence, every: Number.isInteger(every) && every > 0 ? every : 1,
     unit: document.querySelector("#" + prefix + "Unit").value,
     time: document.querySelector("#" + prefix + "Time").value};
 }
@@ -111,6 +130,7 @@ function setupHabitTypes() {
   habitClockDay = todayKey();
   for (const prefix of ["habitNew", "habitEdit"]) {
     document.querySelector("#" + prefix + "Mode").addEventListener("change", () => syncHabitTimingFields(prefix));
+    document.querySelector("#" + prefix + "Cadence").addEventListener("change", () => syncHabitTimingFields(prefix));
     syncHabitTimingFields(prefix);
   }
   document.querySelector("#habitViewAll").addEventListener("click", () => setHabitViewAll(!state.settings.habitsViewAll));

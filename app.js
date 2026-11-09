@@ -1884,6 +1884,7 @@ function addHabit(event) {
 
   els.habitInput.value = "";
   document.querySelector("#habitNewMode").value = "weekdays";
+  document.querySelector("#habitNewCadence").value = "duration";
   document.querySelector("#habitNewTime").value = "";
   document.querySelector("#habitNewEvery").value = "1";
   document.querySelector("#habitNewUnit").value = "day";
@@ -1990,6 +1991,7 @@ function loadHabitEditDraft() {
   document.querySelector("#habitEditName").value = habit.name;
   const timing = habitRule(habit);
   document.querySelector("#habitEditMode").value = timing.mode;
+  document.querySelector("#habitEditCadence").value = timing.cadence;
   document.querySelector("#habitEditEvery").value = timing.every;
   document.querySelector("#habitEditUnit").value = timing.unit;
   document.querySelector("#habitEditTime").value = habit.time || "";
@@ -2008,7 +2010,7 @@ function saveHabitEdits(event) {
   const timing = readHabitTiming("habitEdit");
   if (!timing) return;
   const days = [...document.querySelectorAll('#habitEditDays [aria-pressed="true"]')].map(button => Number(button.dataset.day));
-  if (!name || timing.mode === "weekdays" && !days.length) {
+  if (!name || (timing.mode === "weekdays" || timing.cadence === "days") && !days.length) {
     document.querySelector("#habitEditError").textContent = !name ? "Enter a habit name." : "Choose at least one repeat day.";
     return;
   }
@@ -2016,6 +2018,7 @@ function saveHabitEdits(event) {
   const nextDays = days.length ? days : previousRule.days;
   if (JSON.stringify(nextDays) !== JSON.stringify(habit.days) || timing.mode !== previousRule.mode
     || timing.every !== previousRule.every || timing.unit !== previousRule.unit
+    || timing.cadence !== previousRule.cadence
     || habit.scheduleHistory?.some(item => item.from > todayKey())) {
     const from = todayKey();
     // Date-only legacy check-ins need a timestamp when converting today's completed habit.
@@ -2024,7 +2027,7 @@ function saveHabitEdits(event) {
       (habit.completionEvents ||= []).push({id:createId(),date:from,at:Date.now()});
     }
     const history = habit.scheduleHistory?.length ? habit.scheduleHistory : [{ ...previousRule, from: "0001-01-01" }];
-    const next = { mode: timing.mode, every: timing.every, unit: timing.unit, days: nextDays };
+    const next = { mode: timing.mode, cadence: timing.cadence, every: timing.every, unit: timing.unit, days: nextDays };
     habit.scheduleHistory = [...history.filter(item => item.from < from), { ...next, from }];
     Object.assign(habit, next);
   }
@@ -4263,9 +4266,9 @@ function isHabitScheduled(habit, key) {
 
 function habitScheduleLabel(habit, key = todayKey()) {
   const rule = habitRule(habit, key);
-  if (rule.mode === "interval") return `Every ${rule.every} ${rule.unit}${rule.every === 1 ? "" : "s"}`;
+  if (rule.mode === "interval" && rule.cadence !== "days") return `Every ${rule.every} ${rule.unit}${rule.every === 1 ? "" : "s"}`;
   const label = rule.days.length === 7 ? "Every day" : rule.days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
-  return label + (habit.time ? " / " + formatTime(habit.time) : "");
+  return label + (rule.mode === "interval" ? " / midnight" : habit.time ? " / " + formatTime(habit.time) : "");
 }
 
 function previousHabitDate(habit, key) {

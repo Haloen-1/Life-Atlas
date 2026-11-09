@@ -1,5 +1,6 @@
 # Local launchers and preview tools
 Life Atlas.cmd
+launcher-update.ps1
 Install Life Atlas.cmd
 install-app.ps1
 Preview Life Atlas.cmd

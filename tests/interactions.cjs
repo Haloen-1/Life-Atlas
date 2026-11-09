@@ -637,6 +637,74 @@ let browser;
   await page.locator("#habitEditForm [type=submit]").click();
   assert.equal(await page.locator('[data-habit-id="daily-instant"]').count(),0,"already completed habit hides immediately when changed to an interval");
   assert.equal(await page.evaluate(()=>state.habits[0].completedDates.length),1,"conversion keeps the existing completion");
+  await page.evaluate(() => { setHabitViewAll(true); });
+  await page.locator('[data-habit-id="daily-instant"] [data-action="edit"]').click();
+  await page.locator("#habitEditCadence").selectOption("days",{force:true});
+  assert(await page.locator("#habitEditDays").isVisible(),"weekday choices available for returning habits");
+  assert(!(await page.locator("#habitEditDelay").isVisible()),"duration hidden for selected-day returns");
+  for (const day of [0,2,4,6]) await page.locator('#habitEditDays [data-day="'+day+'"]').click();
+  await page.locator("#habitEditForm [type=submit]").click();
+  assert.deepEqual(await page.evaluate(()=>habitRule(state.habits[0]).days),[1,3,5]);
+  await page.reload();
+  assert.equal(await page.evaluate(()=>habitRule(state.habits[0]).cadence),"days","selected-day timing survives reload");
+  await page.evaluate(()=>{ document.querySelector("#workspaceHabits").click(); });
+  assert.equal(await page.locator("#habitEditCadence").inputValue(),"days","Workspace exposes the saved cadence");
+  await page.locator("#habitEditCancel").click();
+  const weekdayReturns = await page.evaluate(() => {
+    const at = value => new Date(value).getTime();
+    const h = {mode:"interval",cadence:"days",days:[1,3,5],every:1,unit:"day",
+      createdAt:at("2026-11-01T09:00:00"),completedDates:[],completionEvents:[]};
+    const status = value => intervalHabitStatus(h,value.slice(0,10),at(value));
+    const monday = status("2026-11-02T00:00:00").ready;
+    h.completionEvents.push({id:"mon",date:"2026-11-02",at:at("2026-11-02T21:00:00")});
+    h.completedDates.push("2026-11-02");
+    const done = status("2026-11-02T21:00:01");
+    const offDay = status("2026-11-03T12:00:00");
+    const wednesday = status("2026-11-04T00:00:00");
+    h.completionEvents.push({id:"fri",date:"2026-11-06",at:at("2026-11-06T08:00:00")});
+    const friday = status("2026-11-06T09:00:00");
+    removeHabitCompletion(h,"2026-11-02","mon");
+    return {monday,hidden:!done.ready,wedDue:done.dueAt===at("2026-11-04T00:00:00"),
+      offDay:!offDay.ready&&!offDay.done,wed:wednesday.ready,
+      nextWeek:friday.dueAt===at("2026-11-09T00:00:00"),
+      undo:status("2026-11-02T22:00:00").ready,
+      missed:isHabitMissedOnDate(h,"2026-11-04"),offMissed:isHabitMissedOnDate(h,"2026-11-03")};
+  });
+  assert.deepEqual(weekdayReturns,{monday:true,hidden:true,wedDue:true,offDay:true,wed:true,nextWeek:true,undo:true,missed:true,offMissed:false},
+    "selected-day habits start at midnight, skip off days, return after weekends, and preserve backfill semantics");
+  await page.evaluate(()=> {
+    state.habits=[]; state.settings.habitsViewAll=false;
+    els.habitDate.value=todayKey(); render();
+  });
+  await page.locator("#habitNewMode").selectOption("interval",{force:true});
+  await page.locator("#habitNewCadence").selectOption("days",{force:true});
+  assert(await page.locator("#habitRepeatDays").isVisible());
+  await page.locator("#habitInput").fill("Weekday returns");
+  for (const day of [0,2,4,6]) await page.locator('[data-habit-day="'+day+'"]').click();
+  await page.locator("#habitForm [type=submit]").click();
+  assert.equal(await page.evaluate(()=>habitRule(state.habits[0]).cadence),"days");
+  assert.deepEqual(await page.evaluate(()=>state.habits[0].days),[1,3,5]);
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(()=>{ setHabitViewAll(true); openHabitEditor(state.habits[0].id); });
+  await page.screenshot({path:path.join(artifacts,"habit-selected-days-mobile.png")});
+  assert(await page.evaluate(()=> {
+    const r=document.querySelector("#habitEditDays").getBoundingClientRect();
+    return r.left>=0 && r.right<=innerWidth;
+  }),"weekday editor fits mobile");
+  await page.locator("#habitEditCancel").click();
+  await page.clock.setSystemTime(new Date("2026-11-10T23:59:59.900"));
+  await page.evaluate(()=> {
+    state.appView="habits"; state.settings.habitsViewAll=false;
+    state.habits=[{id:"midnight",name:"Midnight return",mode:"interval",cadence:"days",days:[1,3,5],
+      every:1,unit:"day",createdAt:new Date("2026-11-01T00:00:00").getTime(),completedDates:[],order:1}];
+    habitClockDay=todayKey(); habitFollowsToday=true;
+    els.habitDate.value=todayKey(); render();
+  });
+  assert.equal(await page.locator('[data-habit-id="midnight"]').count(),0,"Tuesday stays empty");
+  await page.clock.runFor(150);
+  assert.equal(await page.locator('[data-habit-id="midnight"]').count(),1,"Wednesday habit returns at midnight without a reload");
+  await page.locator('[data-habit-id="midnight"] [data-action="toggle"]').click();
+  assert.equal(await page.locator('[data-habit-id="midnight"]').count(),0,"selected-day habit disappears immediately after completion");
   assert.deepEqual(errors, [], "no app errors");
   console.log("PASS: interval habits, weekday filtering, timing edits, precise undo, history, and existing desktop/mobile interactions.");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {
