@@ -278,18 +278,20 @@ let browser;
   for (let day=0;day<7;day++) await page.locator('#habitEditDays [data-day="'+day+'"]').click();
   await page.locator("#habitEditForm [type=submit]").click();
   assert.match(await page.locator("#habitEditError").innerText(), /at least one/);
-  await page.locator('#habitEditDays [data-day="1"]').click();
+  const nextWeekday = await page.evaluate(() => (new Date().getDay()+1)%7);
+  await page.locator('#habitEditDays [data-day="'+nextWeekday+'"]').click();
   await page.locator("#habitEditForm [type=submit]").click();
   await page.reload();
   assert.deepEqual(await page.evaluate(() => {
     const h = state.habits.find(h=>h.id==="edit-test");
     return {completedDates:h.completedDates,current:habitStreak(h),best:bestHabitStreak(h),days:h.days,order:h.order,createdAt:h.createdAt,id:h.id};
-  }), {completedDates:editingFixture.completedDates,current:3,best:3,days:[1],order:77,createdAt:1,id:"edit-test"}, "schedule edit preserves current and best streak across reload");
+  }), {completedDates:editingFixture.completedDates,current:3,best:3,days:[nextWeekday],order:77,createdAt:1,id:"edit-test"}, "schedule edit preserves current and best streak across reload");
   assert(await page.evaluate(() => {
     const h=state.habits.find(h=>h.id==="edit-test"), tomorrow=new Date(todayKey()+"T12:00:00");
     tomorrow.setDate(tomorrow.getDate()+1);
-    return isHabitScheduled(h,todayKey()) && isHabitScheduled(h,dateKey(tomorrow)) === (tomorrow.getDay()===1);
-  }), "new repeat pattern starts tomorrow only");
+    const yesterday=new Date(todayKey()+"T12:00:00"); yesterday.setDate(yesterday.getDate()-1);
+    return !isHabitScheduled(h,todayKey()) && isHabitScheduled(h,dateKey(tomorrow)) && isHabitScheduled(h,dateKey(yesterday));
+  }), "repeat changes apply today without rewriting yesterday");
   await page.locator("#studioLauncher").click();
   await page.locator('[data-studio-tab="settings"]').click();
   await page.locator("#workspaceHabits").click();
@@ -514,11 +516,11 @@ let browser;
   await page.locator("#habitEditForm [type=submit]").click();
   assert.equal(await page.evaluate(()=>state.habits[0].id),intervalId);
   assert.equal(await page.evaluate(()=>state.habits[0].completionEvents.length),2);
-  assert.equal(await page.evaluate(()=>habitRule(state.habits[0],todayKey()).unit),"hour","existing delay retains today's rule");
+  assert.equal(await page.evaluate(()=>habitRule(state.habits[0],todayKey()).unit),"day","interval edit applies immediately");
   assert.equal(await page.evaluate(()=>{
     const date=new Date(todayKey()+"T12:00");date.setDate(date.getDate()+1);
     return habitRule(state.habits[0],dateKey(date)).unit;
-  }),"day","changed interval begins tomorrow");
+  }),"day","interval edit remains in effect tomorrow");
   await page.evaluate(()=>{
     const d=new Date().getDay();
     state.habits.push({id:"off-day",name:"Weekend activity",days:[(d+1)%7],completedDates:[],createdAt:1,order:1},
@@ -598,6 +600,43 @@ let browser;
   });
   assert.deepEqual(fixedIntervals,{lateNext:true,firstBoundary:true,secondNext:true,secondBoundary:true,skipped:true,weekly:true,undo:true,pastDone:true},
     "fixed cadence never shifts after late completion, handles skipped windows, long intervals, undo and backfill");
+  const clockStart = await page.evaluate(() => new Date(todayKey()+"T09:00:00").getTime());
+  await page.clock.install({time:new Date(clockStart-1000)});
+  await page.clock.pauseAt(new Date(clockStart));
+  await page.emulateMedia({reducedMotion:"no-preference"});
+  await page.evaluate((now) => {
+    state.habits=[{id:"instant",name:"Immediate habit",mode:"interval",every:1,unit:"minute",days:[0,1,2,3,4,5,6],createdAt:now,completedDates:[],order:1}];
+    state.habitBulkCompletions={}; state.habitBulkEventIds={};
+    state.settings.gentleMotion=true; state.settings.habitsViewAll=false;
+    els.habitDate.value=todayKey(); render();
+  },clockStart);
+  await page.locator('[data-habit-id="instant"] [data-action="toggle"]').click();
+  assert.equal(await page.locator('[data-habit-id="instant"]').count(),0,"completed habit removed from live list immediately");
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(STORAGE_KEY)).habits[0].completionEvents.length),1,"saved before exit animation ends");
+  assert(await page.evaluate(()=>[...document.querySelectorAll(".habit-exit-ghost")].every(el=>el.inert&&el.getAttribute("aria-hidden")==="true")),"exit visuals cannot be clicked");
+  await page.clock.runFor(59980);
+  assert.equal(await page.locator('[data-habit-id="instant"]').count(),0);
+  await page.clock.runFor(30);
+  assert.equal(await page.locator('[data-habit-id="instant"]').count(),1,"habit returns at its repeat boundary without refresh or polling delay");
+  await page.locator('[data-habit-id="instant"] [data-action="edit"]').click();
+  await page.locator("#habitEditMode").selectOption("weekdays",{force:true});
+  const thisWeekday = await page.evaluate(()=>new Date().getDay());
+  await page.locator('#habitEditDays [data-day="'+thisWeekday+'"]').click();
+  await page.locator("#habitEditForm [type=submit]").click();
+  assert.equal(await page.locator('[data-habit-id="instant"]').count(),0,"off-day edit hides habit as soon as Save is pressed");
+  await page.evaluate(()=>{
+    state.habits=[{id:"daily-instant",name:"Daily instant",days:[0,1,2,3,4,5,6],createdAt:Date.now()-3600000,completedDates:[],order:1}];
+    state.settings.gentleMotion=false; saveState(); render();
+  });
+  await page.locator('[data-habit-id="daily-instant"] [data-action="toggle"]').click();
+  assert.equal(await page.locator('[data-habit-id="daily-instant"] [data-action="toggle"]').innerText(),"Done","weekday check button changes immediately");
+  await page.locator('[data-habit-id="daily-instant"] [data-action="edit"]').click();
+  await page.locator("#habitEditMode").selectOption("interval",{force:true});
+  await page.locator("#habitEditEvery").fill("1");
+  await page.locator("#habitEditUnit").selectOption("day",{force:true});
+  await page.locator("#habitEditForm [type=submit]").click();
+  assert.equal(await page.locator('[data-habit-id="daily-instant"]').count(),0,"already completed habit hides immediately when changed to an interval");
+  assert.equal(await page.evaluate(()=>state.habits[0].completedDates.length),1,"conversion keeps the existing completion");
   assert.deepEqual(errors, [], "no app errors");
   console.log("PASS: interval habits, weekday filtering, timing edits, precise undo, history, and existing desktop/mobile interactions.");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {

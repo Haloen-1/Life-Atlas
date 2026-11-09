@@ -1923,7 +1923,7 @@ function toggleHabit(habitId, key = selectedHabitDate()) {
   else return;
 
   saveState();
-  render();
+  renderHabitChange(render);
 }
 
 function completeHabitsToday() {
@@ -1950,7 +1950,7 @@ function completeHabitsToday() {
     });
   }
   saveState();
-  render();
+  renderHabitChange(render);
   if (!undo) celebrate();
   showToast(undo ? "Habit completion undone." : `All habits complete for ${key === todayKey() ? "today" : shortDate(key)}.`);
 }
@@ -1995,7 +1995,7 @@ function loadHabitEditDraft() {
   document.querySelector("#habitEditTime").value = habit.time || "";
   syncHabitTimingFields("habitEdit");
   document.querySelectorAll("#habitEditDays button").forEach(button => button.setAttribute("aria-pressed", String(habit.days.includes(Number(button.dataset.day)))));
-  document.querySelector("#habitEditEffective").textContent = "Repeat changes: from tomorrow";
+  document.querySelector("#habitEditEffective").textContent = "Changes apply immediately";
   document.querySelector("#habitEditError").textContent = "";
   syncAtlasSelects();
 }
@@ -2015,10 +2015,14 @@ function saveHabitEdits(event) {
   const previousRule = habitRule(habit);
   const nextDays = days.length ? days : previousRule.days;
   if (JSON.stringify(nextDays) !== JSON.stringify(habit.days) || timing.mode !== previousRule.mode
-    || timing.every !== previousRule.every || timing.unit !== previousRule.unit) {
-    const tomorrow = new Date(todayKey() + "T12:00:00");
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const from = dateKey(tomorrow);
+    || timing.every !== previousRule.every || timing.unit !== previousRule.unit
+    || habit.scheduleHistory?.some(item => item.from > todayKey())) {
+    const from = todayKey();
+    // Date-only legacy check-ins need a timestamp when converting today's completed habit.
+    if (timing.mode === "interval" && habitRule(habit, from).mode !== "interval"
+      && habit.completedDates.includes(from) && !habit.completionEvents?.some(item => item.date === from)) {
+      (habit.completionEvents ||= []).push({id:createId(),date:from,at:Date.now()});
+    }
     const history = habit.scheduleHistory?.length ? habit.scheduleHistory : [{ ...previousRule, from: "0001-01-01" }];
     const next = { mode: timing.mode, every: timing.every, unit: timing.unit, days: nextDays };
     habit.scheduleHistory = [...history.filter(item => item.from < from), { ...next, from }];
@@ -2028,7 +2032,7 @@ function saveHabitEdits(event) {
   habit.name = name;
   saveState();
   document.querySelector("#habitEditDialog").close();
-  render();
+  renderHabitChange(render);
   els.habitList.querySelector(`[data-habit-id="${CSS.escape(habit.id)}"] [data-action="edit"]`)?.focus();
   showToast("Habit updated.");
 }
@@ -3133,6 +3137,7 @@ function renderExams(exams) {
 function renderHabits() {
   els.habitList.innerHTML = "";
   if (!els.habitDate.value) els.habitDate.value = todayKey();
+  scheduleHabitRefresh();
   habitCalendar.sync();
   const selectedDate = selectedHabitDate();
   const selectedLabel = selectedDate === todayKey() ? "today" : shortDate(selectedDate);
@@ -4267,7 +4272,7 @@ function previousHabitDate(habit, key) {
   const cursor = new Date(`${key}T12:00:00`);
   for (let i = 0; i < 7 * ((habit.scheduleHistory?.length || 0) + 1); i += 1) {
     cursor.setDate(cursor.getDate() - 1);
-    if (isHabitScheduled(habit, dateKey(cursor))) return dateKey(cursor);
+    if (isHabitScheduled(habit, dateKey(cursor)) || habit.completedDates?.includes(dateKey(cursor))) return dateKey(cursor);
   }
 }
 
@@ -4275,7 +4280,7 @@ function habitStreak(habit) {
   const completed = new Set(habit.completedDates || []);
   let cursor = todayKey();
   // Today's scheduled occurrence stays open until the day ends.
-  if (!isHabitScheduled(habit, cursor) || !completed.has(cursor)) cursor = previousHabitDate(habit, cursor);
+  if (!completed.has(cursor)) cursor = previousHabitDate(habit, cursor);
   let streak = 0;
   while (completed.has(cursor)) {
     streak += 1;
@@ -4285,7 +4290,7 @@ function habitStreak(habit) {
 }
 
 function bestHabitStreak(habit) {
-  const dates = [...new Set(habit.completedDates || [])].filter((key) => key <= todayKey() && isHabitScheduled(habit, key)).sort();
+  const dates = [...new Set(habit.completedDates || [])].filter((key) => key <= todayKey()).sort();
   let best = 0;
   let current = 0;
   let previous = null;

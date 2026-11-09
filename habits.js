@@ -1,4 +1,7 @@
 /* Recurrence and completion helpers shared by the habit list, editor, and calendar. */
+let habitRefreshTimer = null;
+let habitFollowsToday = true;
+let habitClockDay = null;
 function habitRule(habit, key) {
   const entry = key && habit.scheduleHistory?.filter(item => item.from <= key).at(-1);
   const source = entry || habit;
@@ -50,10 +53,9 @@ function habitCanComplete(habit, key) {
 function recordHabitCompletion(habit, key) {
   habit.completedDates ||= [];
   if (!habit.completedDates.includes(key)) habit.completedDates.push(key);
-  if (habitRule(habit, key).mode !== "interval") return null;
-  const status = intervalHabitStatus(habit, key);
+  const status = habitRule(habit, key).mode === "interval" ? intervalHabitStatus(habit, key) : null;
   const requested = new Date(key + "T" + (habit.time || "12:00") + ":00").getTime();
-  const at = key === todayKey() ? Date.now() : Math.max(status.cycleStart, Math.min(status.cycleEnd - 1, requested));
+  const at = key === todayKey() ? Date.now() : status ? Math.max(status.cycleStart, Math.min(status.cycleEnd - 1, requested)) : requested;
   const event = {id:createId(),date:key,at};
   (habit.completionEvents ||= []).push(event);
   return event.id;
@@ -72,6 +74,8 @@ function removeHabitCompletion(habit, key, eventId) {
   if (habitRule(habit, key).mode === "interval" || eventId) {
     if (target && !target.id.startsWith("legacy:")) habit.completionEvents = (habit.completionEvents || []).filter(event => event.id !== target.id);
     if ((habit.completionEvents || []).some(event => event.date === key)) return;
+  } else if (habit.completionEvents) {
+    habit.completionEvents = habit.completionEvents.filter(event => event.date !== key);
   }
   habit.completedDates = (habit.completedDates || []).filter(date => date !== key);
 }
@@ -79,7 +83,7 @@ function removeHabitCompletion(habit, key, eventId) {
 function setHabitViewAll(value) {
   state.settings.habitsViewAll = value;
   saveState();
-  renderHabits();
+  renderHabitChange(renderHabits);
   document.querySelector("#workspaceHabitViewAll").checked = value;
 }
 
@@ -104,21 +108,86 @@ function readHabitTiming(prefix) {
 }
 
 function setupHabitTypes() {
+  habitClockDay = todayKey();
   for (const prefix of ["habitNew", "habitEdit"]) {
     document.querySelector("#" + prefix + "Mode").addEventListener("change", () => syncHabitTimingFields(prefix));
     syncHabitTimingFields(prefix);
   }
   document.querySelector("#habitViewAll").addEventListener("click", () => setHabitViewAll(!state.settings.habitsViewAll));
   document.querySelector("#workspaceHabitViewAll").addEventListener("change", event => setHabitViewAll(event.target.checked));
-  const refresh = () => {
-    if (state.appView !== "habits" || document.hidden || document.querySelector("dialog[open]")) return;
-    const key = selectedHabitDate();
-    const visible = state.habits.filter(h => state.settings.habitsViewAll || habitIsVisible(h,key)).map(h => h.id).sort().join(",");
-    const current = [...els.habitList.querySelectorAll("[data-habit-id]")].map(el => el.dataset.habitId).sort().join(",");
-    const readiness = state.habits.map(h => h.id + ":" + habitCanComplete(h,key)).join(",");
-    if (visible !== current || readiness !== els.habitList.dataset.readiness) renderHabits();
-  };
-  setInterval(refresh, 15000);
-  window.addEventListener("focus", refresh);
-  document.addEventListener("visibilitychange", refresh);
+  els.habitDate.addEventListener("change", () => { habitFollowsToday = selectedHabitDate() === todayKey(); });
+  window.addEventListener("focus", refreshHabitClock);
+  document.addEventListener("visibilitychange", refreshHabitClock);
+  document.querySelector("#habitEditDialog").addEventListener("close", refreshHabitClock);
+}
+
+function scheduleHabitRefresh() {
+  clearTimeout(habitRefreshTimer);
+  if (state.appView !== "habits") return;
+  const now = Date.now();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  let due = Math.min(next.getTime(), now + 60000);
+  if (selectedHabitDate() === todayKey()) {
+    for (const habit of state.habits) {
+      if (habitRule(habit, todayKey()).mode !== "interval") continue;
+      const status = intervalHabitStatus(habit, todayKey(), now);
+      if (status.dueAt > now) due = Math.min(due, status.dueAt);
+    }
+  }
+  habitRefreshTimer = setTimeout(refreshHabitClock, Math.max(16, due - now + 5));
+}
+
+function refreshHabitClock() {
+  if (state.appView !== "habits") return;
+  if (document.hidden || document.querySelector("dialog[open]")) { scheduleHabitRefresh(); return; }
+  const changedDay = habitFollowsToday && selectedHabitDate() === habitClockDay && habitClockDay !== todayKey();
+  habitClockDay = todayKey();
+  if (changedDay) els.habitDate.value = todayKey();
+  const key = selectedHabitDate();
+  const visible = state.habits.filter(h => state.settings.habitsViewAll || habitIsVisible(h,key)).map(h => h.id).sort().join(",");
+  const current = [...els.habitList.querySelectorAll("[data-habit-id]")].map(el => el.dataset.habitId).sort().join(",");
+  const readiness = state.habits.map(h => h.id + ":" + habitCanComplete(h,key)).join(",");
+  if (changedDay || visible !== current || readiness !== els.habitList.dataset.readiness) renderHabitChange(renderHabits);
+  else scheduleHabitRefresh();
+}
+
+function renderHabitChange(update) {
+  const animate = state.appView === "habits" && state.settings.gentleMotion !== false
+    && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const before = new Map();
+  if (animate) els.habitList.querySelectorAll(".habit-card").forEach(card => {
+    const rect = card.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > innerHeight) return;
+    const style = getComputedStyle(card);
+    before.set(card.dataset.habitId, {rect, done:card.classList.contains("done"), clone:card.cloneNode(true),
+      background:style.backgroundColor, border:style.border, padding:style.padding, columns:style.gridTemplateColumns});
+  });
+  update();
+  if (!animate) return;
+  els.habitList.querySelectorAll(".habit-card").forEach(card => {
+    const prior = before.get(card.dataset.habitId);
+    if (!prior) {
+      card.animate([{opacity:0,transform:"translateY(5px)"},{opacity:1,transform:"none"}], {duration:180,easing:"ease-out"});
+      return;
+    }
+    before.delete(card.dataset.habitId);
+    const rect = card.getBoundingClientRect();
+    if (prior.rect.top !== rect.top) card.animate([{transform:`translateY(${prior.rect.top-rect.top}px)`},{transform:"none"}], {duration:180,easing:"ease-out"});
+    if (!prior.done && card.classList.contains("done")) card.animate([{backgroundColor:prior.background},{backgroundColor:getComputedStyle(card).backgroundColor}], {duration:180});
+  });
+  for (const {rect,clone,background,border,padding,columns} of before.values()) {
+    const habit = state.habits.find(item => item.id === clone.dataset.habitId);
+    const completed = habit && habitRule(habit, selectedHabitDate()).mode === "interval"
+      && intervalHabitStatus(habit, selectedHabitDate()).done;
+    if (completed) clone.querySelector('[data-action="toggle"]').textContent = "Done";
+    clone.className = "habit-exit-ghost";
+    clone.removeAttribute("data-habit-id");
+    clone.inert = true;
+    clone.setAttribute("aria-hidden","true");
+    Object.assign(clone.style, {left:rect.left+"px",top:rect.top+"px",width:rect.width+"px",height:rect.height+"px",background,border,padding,gridTemplateColumns:columns});
+    document.body.append(clone);
+    clone.animate([{opacity:1,transform:"none"},{opacity:0,transform:"translateY(-4px) scale(.98)"}], {duration:160,easing:"ease-out"})
+      .finished.then(() => clone.remove(), () => clone.remove());
+  }
 }
