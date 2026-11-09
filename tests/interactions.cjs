@@ -705,6 +705,63 @@ let browser;
   assert.equal(await page.locator('[data-habit-id="midnight"]').count(),1,"Wednesday habit returns at midnight without a reload");
   await page.locator('[data-habit-id="midnight"] [data-action="toggle"]').click();
   assert.equal(await page.locator('[data-habit-id="midnight"]').count(),0,"selected-day habit disappears immediately after completion");
+  await page.evaluate(()=>{ setHabitViewAll(true); openHabitEditor("midnight"); });
+  assert(await page.locator("#habitEditTime").isVisible(),"fixed-interval time field is editable");
+  await page.locator("#habitEditTime").fill("07:30");
+  await page.locator("#habitEditForm [type=submit]").click();
+  assert.equal(await page.evaluate(()=>habitRule(state.habits[0]).time),"07:30");
+  assert.equal(await page.evaluate(()=>intervalHabitStatus(state.habits[0],todayKey()).done),true,
+    "changing return time preserves today's completed selected-day check-in");
+  await page.reload();
+  await page.evaluate(()=>{ document.querySelector("#workspaceHabits").click(); });
+  assert.equal(await page.locator("#habitEditTime").inputValue(),"07:30","chosen time survives reload and appears in Workspace");
+  await page.locator("#habitEditMode").selectOption("interval",{force:true});
+  await page.locator("#habitEditCadence").selectOption("duration",{force:true});
+  assert(await page.locator("#habitEditTime").isVisible(),"duration intervals also expose the time");
+  await page.locator("#habitEditCancel").click();
+  await page.evaluate(()=> {
+    state.appView="habits"; state.settings.habitsViewAll=false; state.habits=[]; render();
+  });
+  await page.locator("#habitNewMode").selectOption("interval",{force:true});
+  await page.locator("#habitNewCadence").selectOption("days",{force:true});
+  assert(await page.locator("#habitNewTime").isVisible(),"new returning habits have a time field");
+  await page.locator("#habitNewTime").fill("07:30");
+  await page.locator("#habitInput").fill("Morning return");
+  await page.locator("#habitForm [type=submit]").click();
+  assert.equal(await page.locator(".habit-card").count(),0,"not visible before chosen time");
+  await page.clock.setSystemTime(new Date("2026-11-11T07:29:59.900"));
+  await page.evaluate(()=>{ renderHabits(); });
+  await page.clock.runFor(150);
+  assert.equal(await page.locator(".habit-card").count(),1,"habit appears at chosen time without reload");
+  await page.locator(".habit-card [data-action=toggle]").click();
+  assert.equal(await page.locator(".habit-card").count(),0,"timed habit fades away immediately");
+  const chosenTimes = await page.evaluate(()=> {
+    const at=value=>new Date(value).getTime();
+    const h={mode:"interval",cadence:"days",days:[1,3,5],time:"07:30",every:1,unit:"day",
+      createdAt:at("2026-11-01T10:00:00"),completedDates:[],completionEvents:[]};
+    const check=(habit,value)=>intervalHabitStatus(habit,value.slice(0,10),at(value));
+    const before=check(h,"2026-11-02T07:29:59");
+    h.completionEvents.push({id:"morning",date:"2026-11-02",at:at("2026-11-02T08:15:00")});
+    const done=check(h,"2026-11-02T08:16:00");
+    const hour={...h,cadence:"duration",every:2,unit:"hour",completionEvents:[],
+      createdAt:at("2026-11-02T06:00:00")};
+    const hourBefore=check(hour,"2026-11-02T07:29:59");
+    hour.completionEvents.push({id:"hour",date:"2026-11-02",at:at("2026-11-02T07:35:00")});
+    const hourly=check(hour,"2026-11-02T08:00:00");
+    const daily={...hour,every:1,unit:"day"};
+    const dailyDone=check(daily,"2026-11-02T08:00:00");
+    const history={...h,time:"09:00",scheduleHistory:[
+      {from:"0001-01-01",mode:"interval",cadence:"days",days:[1,3,5],time:"07:30"},
+      {from:"2026-11-04",mode:"interval",cadence:"days",days:[1,3,5],time:"09:00"}]};
+    return {before:!before.ready&&before.dueAt===at("2026-11-02T07:30:00"),
+      next:done.dueAt===at("2026-11-04T07:30:00"),off:!check(h,"2026-11-03T08:00:00").ready,
+      hourlyBefore:!hourBefore.ready,hourly:hourly.dueAt===at("2026-11-02T09:30:00"),
+      hourlyReturns:check(hour,"2026-11-02T09:30:00").ready,
+      daily:dailyDone.dueAt===at("2026-11-03T07:30:00"),
+      oldTime:habitRule(history,"2026-11-02").time,newTime:habitRule(history,"2026-11-04").time};
+  });
+  assert.deepEqual(chosenTimes,{before:true,next:true,off:true,hourlyBefore:true,hourly:true,hourlyReturns:true,daily:true,oldTime:"07:30",newTime:"09:00"},
+    "chosen times control weekday and duration returns without moving historical schedules");
   assert.deepEqual(errors, [], "no app errors");
   console.log("PASS: interval habits, weekday filtering, timing edits, precise undo, history, and existing desktop/mobile interactions.");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {

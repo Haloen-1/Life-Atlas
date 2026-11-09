@@ -5,9 +5,11 @@ let habitClockDay = null;
 function habitRule(habit, key) {
   const entry = key && habit.scheduleHistory?.filter(item => item.from <= key).at(-1);
   const source = entry || habit;
+  const time = source.time ?? (source.mode === "interval" ? "" : habit.time);
   return {
     mode: source.mode === "interval" ? "interval" : "weekdays",
     cadence: source.cadence === "days" ? "days" : "duration",
+    time: /^([01]\d|2[0-3]):[0-5]\d$/.test(time || "") ? time : "",
     days: normalizeHabitDays(source.days),
     every: Number.isInteger(source.every) && source.every > 0 ? Math.min(999, source.every) : 1,
     unit: ["minute", "hour", "day", "week"].includes(source.unit) ? source.unit : "day",
@@ -19,7 +21,7 @@ function habitCompletionRecords(habit) {
   const events = (habit.completionEvents || []).filter(event => event && Number.isFinite(event.at));
   const dated = new Set(events.map(event => event.date));
   const legacy = (habit.completedDates || []).filter(date => !dated.has(date)).map(date => ({
-    id: "legacy:" + date, date, at: new Date(date + "T" + (habit.time || "12:00") + ":00").getTime()
+    id: "legacy:" + date, date, at: new Date(date + "T" + (habitRule(habit, date).time || "12:00") + ":00").getTime()
   })).filter(event => Number.isFinite(event.at));
   return [...events, ...legacy].sort((a,b) => a.at - b.at);
 }
@@ -30,12 +32,14 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
   const cutoff = key === today ? now : new Date(key + "T23:59:59.999").getTime();
   const records = habitCompletionRecords(habit).filter(event => event.at <= cutoff);
   if (rule.cadence === "days") {
-    const start = new Date(key + "T00:00:00");
-    const end = new Date(start);
+    const dayStart = new Date(key + "T00:00:00");
+    const start = new Date(key + "T" + (rule.time || "00:00") + ":00");
+    const end = new Date(dayStart);
     end.setDate(end.getDate() + 1);
     const cycleStart = start.getTime(), cycleEnd = end.getTime();
     const scheduled = rule.days.includes(start.getDay());
-    const completion = scheduled ? records.filter(event => event.at >= cycleStart && event.at < cycleEnd).at(-1) : undefined;
+    // Changing today's return time must not discard an earlier check-in.
+    const completion = scheduled ? records.filter(event => event.at >= dayStart.getTime() && event.at < cycleEnd).at(-1) : undefined;
     const done = Boolean(completion);
     const next = new Date(start);
     if (!scheduled || done) {
@@ -45,11 +49,24 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
       done, cycleStart, cycleEnd, completion};
   }
   const duration = rule.every * {minute:60000,hour:3600000,day:86400000,week:604800000}[rule.unit];
-  const initial = Math.max(habit.createdAt || now, rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0);
+  let initial = Math.max(habit.createdAt || now, rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0);
+  if (rule.time) initial = new Date(dateKey(new Date(initial)) + "T" + rule.time + ":00").getTime();
   // Completion fills one fixed window; it never moves the next recurrence.
   const cycle = Math.max(0, Math.floor((cutoff - initial) / duration));
-  const cycleStart = initial + cycle * duration;
-  const cycleEnd = cycleStart + duration;
+  let cycleStart = initial + cycle * duration;
+  let cycleEnd = cycleStart + duration;
+  if (rule.time && ["day", "week"].includes(rule.unit)) {
+    // Calendar-day intervals keep the chosen local time through daylight-saving changes.
+    const days = rule.every * (rule.unit === "week" ? 7 : 1);
+    const slot = Math.max(0, Math.floor(daysBetween(dateKey(new Date(initial)), dateKey(new Date(cutoff))) / days));
+    const start = new Date(initial);
+    start.setDate(start.getDate() + slot * days);
+    if (start.getTime() > cutoff && slot > 0) start.setDate(start.getDate() - days);
+    const end = new Date(start);
+    end.setDate(end.getDate() + days);
+    cycleStart = start.getTime();
+    cycleEnd = end.getTime();
+  }
   const completion = records.filter(event => event.at >= cycleStart && event.at < cycleEnd).at(-1);
   const done = Boolean(completion);
   const dueAt = done ? cycleEnd : cycleStart;
@@ -70,7 +87,7 @@ function recordHabitCompletion(habit, key) {
   habit.completedDates ||= [];
   if (!habit.completedDates.includes(key)) habit.completedDates.push(key);
   const status = habitRule(habit, key).mode === "interval" ? intervalHabitStatus(habit, key) : null;
-  const requested = new Date(key + "T" + (habit.time || "12:00") + ":00").getTime();
+  const requested = new Date(key + "T" + (habitRule(habit, key).time || "12:00") + ":00").getTime();
   const at = key === todayKey() ? Date.now() : status ? Math.max(status.cycleStart, Math.min(status.cycleEnd - 1, requested)) : requested;
   const event = {id:createId(),date:key,at};
   (habit.completionEvents ||= []).push(event);
@@ -111,7 +128,7 @@ function syncHabitTimingFields(prefix) {
   const amount = document.querySelector("#" + prefix + "Every");
   amount.disabled = !interval || selectedDays;
   amount.required = interval && !selectedDays;
-  document.querySelector("#" + prefix + "TimeRow").hidden = interval;
+  document.querySelector("#" + prefix + "TimeRow").hidden = false;
   const weekdays = prefix === "habitNew" ? document.querySelector("#habitRepeatDays") : document.querySelector("#habitEditDays");
   weekdays.closest("fieldset").hidden = interval && !selectedDays;
 }
