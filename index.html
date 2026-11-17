@@ -36,7 +36,7 @@
           <button class="app-nav-item" type="button" data-app-view="time">Schedule</button>
           <button class="app-nav-item" type="button" data-app-view="habits">Habits</button>
           <button class="app-nav-item" type="button" data-app-view="finance">Money</button>
-          <button class="app-nav-item" type="button" data-app-view="exams">Exams</button>
+          <button class="app-nav-item" type="button" data-app-view="exams">Future tests</button>
         </nav>
 
         <nav class="topic-tree" id="topicTree" aria-label="Life areas"></nav>
@@ -180,7 +180,7 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Life track</p>
-                <h3>Big exams</h3>
+                <h3>Future tests</h3>
               </div>
             </div>
             <details class="creator" id="examCreator">
@@ -572,15 +572,19 @@
       <section class="studio-pane" data-studio-pane="permissions" hidden>
         <h3>Journal reminders</h3>
         <form id="journalReminderForm" class="reminder-form">
-          <label class="studio-setting-row">Desktop reminders <input id="jrEnabled" type="checkbox" /></label>
+          <label class="studio-setting-row">Journal reminders <input id="jrEnabled" type="checkbox" /></label>
+          <label class="studio-setting-row">In-app popup <input id="jrInApp" type="checkbox" checked /></label>
+          <label class="studio-setting-row">Catch up missed reminders <input id="jrCatchUp" type="checkbox" checked /></label>
           <small id="jrStatus" role="status"></small>
+          <div class="modal-actions"><button class="ghost-button" type="button" id="jrWindowsExport">Export Windows schedule</button><a class="ghost-button" href="Life-Atlas-Windows-Reminders.zip" download>Windows setup</a></div>
+          <small>Closed-app alerts require Windows setup or an imported calendar reminder.</small>
           <div class="reminder-pair"><label>At <input id="jrTime" type="time" required /></label>
             <label>Starting <input id="jrStart" type="date" required /></label></div>
           <div class="reminder-pair"><label>Every <input id="jrInterval" type="number" min="1" max="99" required /></label>
             <label>Period <select id="jrFrequency"><option value="day">Days</option><option value="week">Weeks</option><option value="month">Months</option><option value="year">Years</option></select></label></div>
           <div class="weekday-picker" id="jrDays" aria-label="Reminder weekdays" hidden></div>
           <label>End date (optional) <input id="jrEnd" type="date" /></label>
-          <div class="modal-actions"><button class="ghost-button" type="button" id="jrExport">Export to calendar</button><button class="primary-button compact" type="submit">Save reminder</button></div>
+          <div class="modal-actions"><button class="ghost-button" type="button" id="jrTest">Test reminder</button><button class="ghost-button" type="button" id="jrExport">Export to calendar</button><button class="primary-button compact" type="submit">Save reminder</button></div>
         </form>
       </section>
       <section class="studio-pane" data-studio-pane="settings" hidden>
@@ -600,7 +604,7 @@
           </select>
         </label>
         <div class="studio-setting-block">
-          <label class="studio-setting-title" for="areaTabOrderSelect"><strong>Area tab order</strong></label>
+          <label class="studio-setting-title" for="areaTabOrderSelect"><strong>Areas, Notes &amp; Tasks order</strong></label>
           <select id="areaTabOrderSelect" aria-label="Area tab order">
             <option value="topics,homework,notes">Areas / Tasks / Notes</option>
             <option value="topics,notes,homework">Areas / Notes / Tasks</option>

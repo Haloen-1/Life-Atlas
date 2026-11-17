@@ -28,7 +28,7 @@ const OPTIONAL_SECTIONS = [
   { id: "time", label: "Schedule" },
   { id: "habits", label: "Habits" },
   { id: "finance", label: "Money" },
-  { id: "exams", label: "Exams" }
+  { id: "exams", label: "Future tests" }
 ];
 
 const defaultState = {
@@ -2812,7 +2812,7 @@ function titleForAppView(appView) {
     finance: "Money",
     time: "Schedule",
     habits: "Habit Tracker",
-    exams: "Big Exams"
+    exams: "Future tests"
   }[appView] || "Life";
 }
 
@@ -3118,7 +3118,7 @@ function renderExams(exams) {
   els.examList.innerHTML = "";
 
   if (!exams.length) {
-    els.examList.innerHTML = `<div class="empty">Add big exams here. Export them to Calendar for iPhone and laptop reminders.</div>`;
+    els.examList.innerHTML = `<div class="empty">No future tests.</div>`;
     return;
   }
 

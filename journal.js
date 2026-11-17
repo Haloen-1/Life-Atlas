@@ -88,6 +88,17 @@ function setupJournal() {
   journalEl("jrFrequency").addEventListener("change", () => { journalEl("jrDays").hidden = journalEl("jrFrequency").value !== "week"; });
   journalEl("journalReminderForm").addEventListener("submit", saveJournalReminder);
   journalEl("jrExport").addEventListener("click", exportJournalReminder);
+  journalEl("jrWindowsExport").addEventListener("click", exportWindowsJournalReminder);
+  journalEl("jrTest").addEventListener("click", testJournalReminder);
+  const popup = document.createElement("aside");
+  popup.id = "journalReminderPopup";
+  popup.className = "journal-reminder-popup";
+  popup.hidden = true;
+  popup.setAttribute("role", "alert");
+  popup.innerHTML = '<img src="icon.svg" alt="" width="40" height="40"><div><strong>Life Atlas</strong><p id="journalReminderMessage">A moment for your journal.</p><button class="ghost-button compact" type="button" id="journalReminderOpen">Open journal</button></div><button type="button" class="journal-reminder-close" id="journalReminderDismiss" aria-label="Dismiss journal reminder">&#215;</button>';
+  document.body.append(popup);
+  journalEl("journalReminderDismiss").addEventListener("click", () => { popup.hidden = true; });
+  journalEl("journalReminderOpen").addEventListener("click", () => { popup.hidden = true; visit("journal"); });
   setInterval(checkJournalReminder, 15000);
   window.addEventListener("focus", checkJournalReminder);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) checkJournalReminder(); });
@@ -135,23 +146,26 @@ function bindBlockSelection(lane, range) {
 }
 
 function reminderDefaults() {
-  return { enabled: false, time: "20:30", frequency: "day", interval: 1, days: [new Date().getDay()], start: todayKey(), end: "" };
+  return { enabled: false, inApp: true, catchUp: true, time: "20:30", frequency: "day", interval: 1, days: [new Date().getDay()], start: todayKey(), end: "" };
 }
 
 function renderReminderSettings() {
   const r = { ...reminderDefaults(), ...state.settings.journalReminder };
   journalEl("jrEnabled").checked = r.enabled;
+  journalEl("jrInApp").checked = r.inApp !== false;
+  journalEl("jrCatchUp").checked = r.catchUp !== false;
   for (const [id, value] of [["jrTime",r.time],["jrInterval",r.interval],["jrFrequency",r.frequency],["jrStart",r.start],["jrEnd",r.end]]) journalEl(id).value = value;
   journalEl("jrDays").hidden = r.frequency !== "week";
   journalEl("jrDays").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(r.days.includes(Number(b.dataset.day)))));
   const permission = window.Notification?.permission;
-  journalEl("jrStatus").textContent = permission === "denied" ? "Blocked in site permissions. Calendar export is still available." : !permission ? "Desktop alerts unavailable here. Use calendar export." : "Desktop alerts run while Life Atlas is open. Export for calendar reminders when closed.";
+  journalEl("jrStatus").textContent = permission === "denied" ? "Desktop alerts are blocked. In-app reminders remain available." : permission !== "granted" ? "Desktop permission is not enabled. Test reminder can request it." : "Desktop permission is allowed. Windows notification banners and Do not disturb still apply.";
   syncAtlasSelects();
 }
 
 function readReminderForm() {
   if (!journalEl("journalReminderForm").reportValidity()) return null;
-  const r = { enabled: journalEl("jrEnabled").checked, time: journalEl("jrTime").value, frequency: journalEl("jrFrequency").value,
+  const r = { enabled: journalEl("jrEnabled").checked, inApp: journalEl("jrInApp").checked, catchUp: journalEl("jrCatchUp").checked,
+    time: journalEl("jrTime").value, frequency: journalEl("jrFrequency").value,
     interval: journalEl("jrInterval").valueAsNumber, start: journalEl("jrStart").value, end: journalEl("jrEnd").value,
     days: [...journalEl("jrDays").querySelectorAll('[aria-pressed="true"]')].map(b => Number(b.dataset.day)) };
   if (r.end && r.end < r.start || r.frequency === "week" && !r.days.length) {
@@ -172,10 +186,9 @@ async function saveJournalReminder(event) {
       blocked = !permission || (permission === "default" ? await Notification.requestPermission() : permission) !== "granted";
     } catch { blocked = true; }
   }
-  if (blocked) r.enabled = false;
   state.settings.journalReminder = r;
   saveState(); renderReminderSettings();
-  journalEl("jrStatus").textContent = blocked ? "Schedule saved. Allow notifications in site settings or export to your calendar." : r.enabled ? "Reminder saved. Keep Life Atlas open for desktop alerts." : "Schedule saved. Desktop reminders are off.";
+  journalEl("jrStatus").textContent = blocked ? "Schedule saved. Desktop permission is blocked; in-app reminders are still enabled if selected." : r.enabled ? "Reminder saved. Browser reminders require Life Atlas to be open; use a Windows or calendar reminder when closed." : "Schedule saved. Reminders are off.";
   checkJournalReminder();
 }
 
@@ -191,24 +204,64 @@ function reminderMatches(r, date) {
 }
 
 let journalNotifying = false;
+function showJournalReminderPopup(test = false) {
+  const popup = journalEl("journalReminderPopup");
+  journalEl("journalReminderMessage").textContent = test ? "Your reminder preview." : "A moment for your journal.";
+  popup.hidden = false;
+  if (state.settings.gentleMotion !== false && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    popup.getAnimations().forEach(animation => animation.cancel());
+    popup.animate([{opacity:0,transform:"translateX(24px)"},{opacity:1,transform:"none"}],
+      {duration:240,easing:"cubic-bezier(.2,.8,.2,1)"});
+  }
+}
+
+async function deliverJournalReminder(r, test = false) {
+  let visible = false, desktop = false;
+  if (r.inApp !== false && !document.hidden) { showJournalReminderPopup(test); visible = true; }
+  if (window.Notification?.permission === "granted") {
+    const options = {body:test ? "Your journal reminder is ready." : "A moment for your journal.",tag:test ? "life-atlas-journal-test" : "life-atlas-journal",
+      icon:"icon.svg",data:{journal:true}};
+    try {
+      const reg = location.protocol !== "file:" && await navigator.serviceWorker?.getRegistration();
+      if (reg?.active) await reg.showNotification("Life Atlas Journal",options);
+      else {
+        const alert = new Notification("Life Atlas Journal",options);
+        alert.onclick = () => { window.focus(); openAppView("time"); selectScheduleView("journal"); alert.close(); };
+      }
+      desktop = true;
+    } catch {
+      journalEl("jrStatus").textContent = "Windows notification delivery failed. Check site permissions and Windows notification settings.";
+    }
+  }
+  return {visible,desktop};
+}
+
+async function testJournalReminder() {
+  const button = journalEl("jrTest");
+  button.disabled = true;
+  try {
+    try { if (window.Notification?.permission === "default") await Notification.requestPermission(); } catch {}
+    const result = await deliverJournalReminder({inApp:journalEl("jrInApp").checked},true);
+    journalEl("jrStatus").textContent = result.desktop
+      ? "Test sent to Windows. If no banner appears, check Windows Notifications and Do not disturb."
+      : result.visible ? "In-app test shown. Desktop alerts need browser and Windows permission."
+      : "No notification could be shown. Enable the in-app popup or allow desktop notifications.";
+  } catch { journalEl("jrStatus").textContent = "The test could not request desktop permission. Check site notification settings."; }
+  finally { button.disabled = false; }
+}
+
 async function checkJournalReminder(now = new Date()) {
   if (!(now instanceof Date)) now = new Date();
   const r = state.settings.journalReminder;
-  if (!r?.enabled || window.Notification?.permission !== "granted" || journalNotifying) return;
+  if (!r?.enabled || journalNotifying) return;
   const date = dateKey(now), due = new Date(date + "T" + r.time);
-  if (!reminderMatches(r, date) || now < due || now - due >= 60000) return;
+  if (!reminderMatches(r, date) || now < due || r.catchUp === false && now - due >= 60000) return;
   const slot = date + "T" + r.time, key = STORAGE_KEY + "-journal-delivered";
   if (localStorage.getItem(key) === slot) return;
   journalNotifying = true;
   try {
-    const options = { body: "Time for your daily entry.", tag: "life-atlas-journal", data: { journal: true } };
-    const reg = location.protocol !== "file:" && await navigator.serviceWorker?.getRegistration();
-    if (reg?.active) await reg.showNotification("Life Atlas Journal", options);
-    else {
-      const alert = new Notification("Life Atlas Journal", options);
-      alert.onclick = () => { window.focus(); openAppView("time"); selectScheduleView("journal"); alert.close(); };
-    }
-    localStorage.setItem(key, slot);
+    const result = await deliverJournalReminder(r);
+    if (result.visible || result.desktop) localStorage.setItem(key, slot);
   } catch { journalEl("jrStatus").textContent = "Desktop delivery failed. Check Windows and site notification permissions."; }
   finally { journalNotifying = false; }
 }
@@ -230,4 +283,16 @@ function exportJournalReminder() {
     "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g,"").split(".")[0] + "Z","DTSTART:" + dateKey(first).replaceAll("-","") + "T" + r.time.replace(":","") + "00",
     "DURATION:PT5M","SUMMARY:Life Atlas Journal","RRULE:" + rule,"BEGIN:VALARM","ACTION:DISPLAY","TRIGGER:PT0M","DESCRIPTION:Journal reminder","END:VALARM","END:VEVENT","END:VCALENDAR",""];
   downloadTextFile("life-atlas-journal-reminder.ics", lines.join("\r\n"), "text/calendar");
+}
+
+function exportWindowsJournalReminder() {
+  const reminder = readReminderForm();
+  if (!reminder) return;
+  const url = new URL(location.href);
+  url.hash = "journal";
+  url.search = "";
+  downloadTextFile("life-atlas-windows-reminder.json", JSON.stringify({
+    app:"Life Atlas",version:1,url:url.href,reminder
+  },null,2),"application/json");
+  journalEl("jrStatus").textContent = "Windows schedule exported. Open Windows setup and select this file to install or update closed-app alerts.";
 }
