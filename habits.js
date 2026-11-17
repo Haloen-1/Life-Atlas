@@ -2,6 +2,7 @@
 let habitRefreshTimer = null;
 let habitFollowsToday = true;
 let habitClockDay = null;
+const habitStartCalendars = {};
 function habitRule(habit, key) {
   const entry = key && habit.scheduleHistory?.filter(item => item.from <= key).at(-1);
   const source = entry || habit;
@@ -9,6 +10,7 @@ function habitRule(habit, key) {
   return {
     mode: source.mode === "interval" ? "interval" : "weekdays",
     cadence: source.cadence === "days" ? "days" : "duration",
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(source.startDate || "") ? source.startDate : "",
     time: /^([01]\d|2[0-3]):[0-5]\d$/.test(time || "") ? time : "",
     days: normalizeHabitDays(source.days),
     every: Number.isInteger(source.every) && source.every > 0 ? Math.min(999, source.every) : 1,
@@ -31,6 +33,11 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
   const today = dateKey(new Date(now));
   const cutoff = key === today ? now : new Date(key + "T23:59:59.999").getTime();
   const records = habitCompletionRecords(habit).filter(event => event.at <= cutoff);
+  if (rule.startDate && key < rule.startDate) {
+    const first = new Date(rule.startDate + "T" + (rule.time || "00:00") + ":00");
+    if (rule.cadence === "days") while (!rule.days.includes(first.getDay())) first.setDate(first.getDate()+1);
+    return {dueAt:first.getTime(), ready:false, done:false, cycleStart:first.getTime(), cycleEnd:first.getTime()};
+  }
   if (rule.cadence === "days") {
     const dayStart = new Date(key + "T00:00:00");
     const start = new Date(key + "T" + (rule.time || "00:00") + ":00");
@@ -41,21 +48,24 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
     // Changing today's return time must not discard an earlier check-in.
     const completion = scheduled ? records.filter(event => event.at >= dayStart.getTime() && event.at < cycleEnd).at(-1) : undefined;
     const done = Boolean(completion);
+    const nextOccurrence = new Date(start);
+    do { nextOccurrence.setDate(nextOccurrence.getDate() + 1); } while (!rule.days.includes(nextOccurrence.getDay()));
     const next = new Date(start);
     if (!scheduled || done) {
       do { next.setDate(next.getDate() + 1); } while (!rule.days.includes(next.getDay()));
     }
     return {dueAt:next.getTime(), ready:scheduled && !done && cutoff >= cycleStart,
-      done, cycleStart, cycleEnd, completion};
+      done, cycleStart, cycleEnd, nextAt:nextOccurrence.getTime(), completion};
   }
   const duration = rule.every * {minute:60000,hour:3600000,day:86400000,week:604800000}[rule.unit];
   let initial = Math.max(habit.createdAt || now, rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0);
   if (rule.time) initial = new Date(dateKey(new Date(initial)) + "T" + rule.time + ":00").getTime();
+  if (rule.startDate) initial = new Date(rule.startDate + "T" + (rule.time || "00:00") + ":00").getTime();
   // Completion fills one fixed window; it never moves the next recurrence.
   const cycle = Math.max(0, Math.floor((cutoff - initial) / duration));
   let cycleStart = initial + cycle * duration;
   let cycleEnd = cycleStart + duration;
-  if (rule.time && ["day", "week"].includes(rule.unit)) {
+  if ((rule.time || rule.startDate) && ["day", "week"].includes(rule.unit)) {
     // Calendar-day intervals keep the chosen local time through daylight-saving changes.
     const days = rule.every * (rule.unit === "week" ? 7 : 1);
     const slot = Math.max(0, Math.floor(daysBetween(dateKey(new Date(initial)), dateKey(new Date(cutoff))) / days));
@@ -67,15 +77,87 @@ function intervalHabitStatus(habit, key, now = Date.now()) {
     cycleStart = start.getTime();
     cycleEnd = end.getTime();
   }
+  const nextAt = cycleEnd;
+  if (rule.startDate && ["day", "week"].includes(rule.unit)) {
+    const onDate = dateKey(new Date(cycleStart));
+    if (onDate !== key) return {dueAt:cutoff < initial ? initial : nextAt, ready:false, done:false, cycleStart, cycleEnd, nextAt};
+    const endOfDay = new Date(onDate + "T00:00:00");
+    endOfDay.setDate(endOfDay.getDate()+1);
+    cycleEnd = endOfDay.getTime();
+  }
   const completion = records.filter(event => event.at >= cycleStart && event.at < cycleEnd).at(-1);
   const done = Boolean(completion);
-  const dueAt = done ? cycleEnd : cycleStart;
-  return { dueAt, ready: cutoff >= cycleStart && !done, done, cycleStart, cycleEnd, completion };
+  const dueAt = done ? nextAt : cycleStart;
+  return { dueAt, ready: cutoff >= cycleStart && !done, done, cycleStart, cycleEnd, nextAt, completion };
 }
 
 function habitIsVisible(habit, key) {
   return habitRule(habit, key).mode === "interval"
-    ? intervalHabitStatus(habit, key).ready : isHabitScheduled(habit, key);
+    ? intervalHabitStatus(habit, key).ready : habitCanComplete(habit, key);
+}
+
+function habitOccurrence(habit, at) {
+  const key = dateKey(new Date(at));
+  const rule = habitRule(habit, key);
+  const dayStart = new Date(key + "T00:00:00").getTime();
+  if (rule.mode === "interval") {
+    const status = intervalHabitStatus(habit, key, at);
+    const effective = rule.from ? new Date(rule.from + "T00:00:00").getTime() : 0;
+    return {start:Math.max(status.cycleStart,effective),end:status.cycleEnd,
+      next:status.nextAt || status.cycleEnd, valid:status.ready || status.done};
+  }
+  const end = new Date(dayStart);
+  end.setDate(end.getDate()+1);
+  const next = new Date(end);
+  for (let i=0;i<7;i++) {
+    if (habitRule(habit,dateKey(next)).mode === "interval" || habitRule(habit,dateKey(next)).days.includes(next.getDay())) break;
+    next.setDate(next.getDate()+1);
+  }
+  return {start:dayStart,end:end.getTime(),next:next.getTime(),valid:rule.days.includes(new Date(at).getDay())};
+}
+
+function nextHabitOccurrence(habit, occurrence) {
+  let next = occurrence.next;
+  // A rule change can introduce an occurrence before the old rule's next date.
+  const change = habit.scheduleHistory?.find(item => {
+    const at = new Date(item.from + "T00:00:00").getTime();
+    return at > occurrence.start && at <= next;
+  });
+  if (change) {
+    const at = new Date(change.from + "T00:00:00").getTime();
+    const rule = habitRule(habit,change.from);
+    if (rule.mode === "interval") {
+      const status = intervalHabitStatus(habit,change.from,at);
+      next = status.ready || status.done ? Math.max(at,status.cycleStart) : status.dueAt;
+    } else {
+      const day = new Date(at);
+      while (!habitRule(habit,dateKey(day)).days.includes(day.getDay())) day.setDate(day.getDate()+1);
+      next = day.getTime();
+    }
+  }
+  return next;
+}
+
+function intervalHabitStreaks(habit, now = Date.now()) {
+  const occurrences = new Map();
+  for (const event of habitCompletionRecords(habit)) {
+    if (event.at > now) continue;
+    const occurrence = habitOccurrence(habit,event.at);
+    if (occurrence.valid) occurrences.set(occurrence.start,occurrence);
+  }
+  const ordered = [...occurrences.values()].sort((a,b)=>a.start-b.start);
+  let current=0, best=0, previous;
+  for (const occurrence of ordered) {
+    current = previous && nextHabitOccurrence(habit,previous) === occurrence.start ? current+1 : 1;
+    best = Math.max(best,current);
+    previous = occurrence;
+  }
+  if (previous) {
+    const next = nextHabitOccurrence(habit,previous);
+    const pending = habitOccurrence(habit,next);
+    if (now >= pending.end) current=0;
+  }
+  return {current,best};
 }
 
 function habitCanComplete(habit, key) {
@@ -129,6 +211,9 @@ function syncHabitTimingFields(prefix) {
   amount.disabled = !interval || selectedDays;
   amount.required = interval && !selectedDays;
   document.querySelector("#" + prefix + "TimeRow").hidden = false;
+  document.querySelector("#" + prefix + "StartRow").hidden = !interval;
+  habitStartCalendars[prefix]?.sync();
+  if (!document.querySelector("#" + prefix + "StartDate").value) document.querySelector("#" + prefix + "StartDateButton").textContent = "Choose date";
   const weekdays = prefix === "habitNew" ? document.querySelector("#habitRepeatDays") : document.querySelector("#habitEditDays");
   weekdays.closest("fieldset").hidden = interval && !selectedDays;
 }
@@ -138,7 +223,8 @@ function readHabitTiming(prefix) {
   const every = document.querySelector("#" + prefix + "Every").valueAsNumber;
   const cadence = document.querySelector("#" + prefix + "Cadence").value;
   if (mode === "interval" && cadence !== "days" && (!Number.isInteger(every) || every < 1 || every > 999)) return null;
-  return {mode, cadence, every: Number.isInteger(every) && every > 0 ? every : 1,
+  return {mode, cadence, startDate: document.querySelector("#" + prefix + "StartDate").value,
+    every: Number.isInteger(every) && every > 0 ? every : 1,
     unit: document.querySelector("#" + prefix + "Unit").value,
     time: document.querySelector("#" + prefix + "Time").value};
 }
@@ -146,6 +232,31 @@ function readHabitTiming(prefix) {
 function setupHabitTypes() {
   habitClockDay = todayKey();
   for (const prefix of ["habitNew", "habitEdit"]) {
+    const row = document.createElement("div");
+    row.id = prefix + "StartRow";
+    row.className = "habit-start-date";
+    const p = prefix + "Start";
+    row.innerHTML = `<span>Start date (optional)</span><input type="hidden" id="${p}Date">
+      <div class="habit-date-toolbar">
+        <button type="button" id="${p}PreviousDay" aria-label="Previous start day">&#8249;</button>
+        <button type="button" id="${p}DateButton" aria-haspopup="dialog" aria-controls="${p}Calendar" aria-expanded="false">Choose date</button>
+        <button type="button" id="${p}NextDay" aria-label="Next start day">&#8250;</button>
+        <button type="button" id="${p}Today">Today</button>
+        <button type="button" id="${p}Clear" aria-label="Clear start date" title="Clear start date">&#215;</button>
+      </div>
+      <div class="habit-calendar" id="${p}Calendar" popover="auto" role="dialog" aria-label="Choose habit start date">
+        <div class="habit-calendar-heading">
+          <button type="button" data-calendar-action="previous" aria-label="Previous month">&#8249;</button>
+          <button type="button" id="${p}CalendarHeading"></button>
+          <button type="button" data-calendar-action="next" aria-label="Next month">&#8250;</button>
+        </div><div id="${p}CalendarGrid"></div>
+        <div class="habit-calendar-footer"><button type="button" data-calendar-action="today">Today</button><button type="button" data-calendar-action="close">Close</button></div>
+      </div>`;
+    document.querySelector("#" + prefix + "TimeRow").after(row);
+    const input = document.querySelector("#" + p + "Date");
+    habitStartCalendars[prefix] = setupHabitCalendar(input, p);
+    input.addEventListener("change", () => syncHabitTimingFields(prefix));
+    document.querySelector("#" + p + "Clear").addEventListener("click", () => { input.value = ""; syncHabitTimingFields(prefix); });
     document.querySelector("#" + prefix + "Mode").addEventListener("change", () => syncHabitTimingFields(prefix));
     document.querySelector("#" + prefix + "Cadence").addEventListener("change", () => syncHabitTimingFields(prefix));
     syncHabitTimingFields(prefix);
@@ -215,8 +326,8 @@ function renderHabitChange(update) {
   });
   for (const {rect,clone,background,border,padding,columns} of before.values()) {
     const habit = state.habits.find(item => item.id === clone.dataset.habitId);
-    const completed = habit && habitRule(habit, selectedHabitDate()).mode === "interval"
-      && intervalHabitStatus(habit, selectedHabitDate()).done;
+    const completed = habit && (habitRule(habit, selectedHabitDate()).mode === "interval"
+      ? intervalHabitStatus(habit, selectedHabitDate()).done : habit.completedDates.includes(selectedHabitDate()));
     if (completed) clone.querySelector('[data-action="toggle"]').textContent = "Done";
     clone.className = "habit-exit-ghost";
     clone.removeAttribute("data-habit-id");

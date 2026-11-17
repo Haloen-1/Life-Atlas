@@ -39,6 +39,9 @@
 .habit-timing-fields label, .habit-delay label { display: grid; gap: 5px; color: var(--muted); font-size: .78rem; font-weight: 600; }
 .habit-delay { display: grid; grid-template-columns: minmax(64px, 1fr) minmax(96px, 1fr); gap: 8px; }
 .habit-delay input { min-width: 0; width: 100%; }
+.habit-start-date { min-width: 0; grid-column: 1 / -1; display: grid; gap: 5px; font-size: .78rem; color: var(--muted); }
+.habit-start-date .habit-date-toolbar { margin: 0; flex-wrap: wrap; }
+.habit-start-date .habit-date-toolbar button { min-width: 0; }
 .habit-timing-fields input { min-height: 38px; }
 .habit-timing-fields .atlas-select-trigger { min-height: 38px; }
 #habitForm { max-width: 100%; }

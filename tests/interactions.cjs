@@ -147,6 +147,7 @@ let browser;
   assert.deepEqual(await page.evaluate(() => state.habits[0].days), [1, 3, 5]);
   await page.locator("#habitInput").fill("Read a page");
   await page.locator("#habitForm button[type=submit]").click();
+  await page.evaluate(()=>setHabitViewAll(true));
   const cards = page.locator(".habit-card");
   const a = await cards.nth(0).boundingBox(), b = await cards.nth(1).boundingBox();
   await page.mouse.move(a.x + 80, a.y + 25);
@@ -178,13 +179,14 @@ let browser;
       { id: "bulk-done", name: "Walk", days: [weekday], completedDates: [today], createdAt: 1 },
       { id: "bulk-off", name: "Practice", days: [(weekday + 1) % 7], completedDates: [], createdAt: 1 }
     ];
+    state.settings.habitsViewAll=false;
     els.habitDate.value = today;
     render();
   });
   await page.locator("#completeHabitsToday").click();
   assert.equal(await page.locator("#completeHabitsToday").innerText(), "Undo complete all");
   assert(await page.locator("#completeHabitsToday").isEnabled());
-  assert.equal(await page.locator(".habit-card.done").count(), 2);
+  assert.equal(await page.locator(".habit-card.done").count(), 0,"completed weekday habits leave the due list");
   assert.deepEqual(await page.evaluate(() => {
     return state.habits.map((habit) => habit.completedDates);
   }), await page.evaluate(() => [["2026-01-01", todayKey()], [todayKey()], []]), "only due habits complete, without duplicates");
@@ -205,7 +207,7 @@ let browser;
   await page.locator("#habitNextDay").click();
   await page.locator("#habitDateButton").click();
   await page.locator("#habitCalendarHeading").click();
-  await page.locator('[data-calendar-action="previous"]').click();
+  await page.locator('#habitCalendar [data-calendar-action="previous"]').click();
   await page.getByRole("button", { name: "January 2023", exact: true }).click();
   await page.locator('[data-date="2023-01-02"]').click();
   assert.equal(await page.locator("#habitDate").inputValue(), "2023-01-02");
@@ -228,7 +230,7 @@ let browser;
   const habitPopup = await page.locator("#habitCalendar").boundingBox();
   assert(habitPopup.x >= 0 && habitPopup.x + habitPopup.width <= 390 && habitPopup.y + habitPopup.height <= 844, "habit calendar fits mobile");
   await page.screenshot({ path: path.join(artifacts, "habits-complete-all-mobile.png") });
-  await page.locator('[data-calendar-action="close"]').click();
+  await page.locator('#habitCalendar [data-calendar-action="close"]').click();
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.evaluate(() => { state.habits = []; renderHabits(); });
   assert(await page.locator("#completeHabitsToday").isHidden(), "no empty completion action");
@@ -236,6 +238,8 @@ let browser;
   await page.locator("#habitInput").fill("Test habit");
   await page.locator("#habitForm button[type=submit]").click();
   await page.locator('.habit-card').filter({ hasText: "Test habit" }).locator('[data-action="toggle"]').click();
+  assert.equal(await page.locator('.habit-card').filter({hasText:"Test habit"}).count(),0);
+  await page.evaluate(()=>setHabitViewAll(true));
   const removeHabit = page.getByRole("button", { name: "Delete habit: Test habit", exact: true });
   const beforeDelete = await page.evaluate(() => JSON.stringify(state.habits));
   await removeHabit.click();
@@ -629,8 +633,8 @@ let browser;
     state.settings.gentleMotion=false; saveState(); render();
   });
   await page.locator('[data-habit-id="daily-instant"] [data-action="toggle"]').click();
-  assert.equal(await page.locator('[data-habit-id="daily-instant"] [data-action="toggle"]').innerText(),"Done","weekday check button changes immediately");
-  await page.locator('[data-habit-id="daily-instant"] [data-action="edit"]').click();
+  assert.equal(await page.locator('[data-habit-id="daily-instant"]').count(),0,"weekday habit disappears immediately");
+  await page.evaluate(()=>openHabitEditor("daily-instant"));
   await page.locator("#habitEditMode").selectOption("interval",{force:true});
   await page.locator("#habitEditEvery").fill("1");
   await page.locator("#habitEditUnit").selectOption("day",{force:true});
@@ -762,6 +766,68 @@ let browser;
   });
   assert.deepEqual(chosenTimes,{before:true,next:true,off:true,hourlyBefore:true,hourly:true,hourlyReturns:true,daily:true,oldTime:"07:30",newTime:"09:00"},
     "chosen times control weekday and duration returns without moving historical schedules");
+  const alternating = await page.evaluate(()=> {
+    const at=value=>new Date(value).getTime();
+    const base={mode:"interval",cadence:"duration",startDate:"2026-11-17",time:"07:30",unit:"day",every:2,
+      days:[0,1,2,3,4,5,6],createdAt:at("2026-11-17T06:00:00"),completedDates:[],completionEvents:[]};
+    const other={...base,startDate:"2026-11-18"};
+    const check=(h,value)=>intervalHabitStatus(h,value.slice(0,10),at(value));
+    const days=Array.from({length:40},(_,i)=>{
+      const d=new Date("2026-11-17T08:00:00"); d.setDate(d.getDate()+i);
+      const value=dateKey(d)+"T08:00:00";
+      return [check(base,value).ready,check(other,value).ready];
+    });
+    const h=structuredClone(base);
+    for(const key of ["2026-11-17","2026-11-19","2026-11-21"]) {
+      h.completedDates.push(key); h.completionEvents.push({id:key,date:key,at:at(key+"T08:00:00")});
+    }
+    const resting=intervalHabitStreaks(h,at("2026-11-22T20:00:00"));
+    const pending=intervalHabitStreaks(h,at("2026-11-23T20:00:00"));
+    const missed=intervalHabitStreaks(h,at("2026-11-24T00:00:00"));
+    h.completedDates.push("2026-11-23"); h.completionEvents.push({id:"repair",date:"2026-11-23",at:at("2026-11-23T08:00:00")});
+    const repaired=intervalHabitStreaks(h,at("2026-11-24T12:00:00"));
+    removeHabitCompletion(h,"2026-11-19","2026-11-19");
+    const undone=intervalHabitStreaks(h,at("2026-11-24T12:00:00"));
+    const hourly={...base,startDate:"2026-11-17",unit:"hour",every:2,completedDates:["2026-11-17"],completionEvents:[
+      {id:"h1",date:"2026-11-17",at:at("2026-11-17T07:45:00")},
+      {id:"h2",date:"2026-11-17",at:at("2026-11-17T09:45:00")}]};
+    return {alternates:days.every((row,i)=>row[0]===(i%2===0)&&row[1]===(i%2===1)),
+      before:!check(base,"2026-11-17T07:29:59").ready,resting,pending,missed,repaired,undone,
+      hourly:intervalHabitStreaks(hourly,at("2026-11-17T11:00:00")),
+      hourlyMissed:intervalHabitStreaks(hourly,at("2026-11-17T13:30:00"))};
+  });
+  assert.deepEqual(alternating,{alternates:true,before:true,resting:{current:3,best:3},pending:{current:3,best:3},
+    missed:{current:0,best:3},repaired:{current:4,best:4},undone:{current:2,best:2},
+    hourly:{current:2,best:2},hourlyMissed:{current:0,best:2}},
+    "fixed starts alternate across months and streaks count scheduled occurrences, with backfill and undo");
+  await page.evaluate(()=>{state.habits=[];state.settings.habitsViewAll=false;openAppView("habits");render();});
+  for (const [name,start] of [["Back stretch","2026-11-17"],["Badminton stretch","2026-11-18"]]) {
+    await page.locator("#habitNewMode").selectOption("interval",{force:true});
+    await page.locator("#habitNewEvery").fill("2");
+    await page.locator("#habitNewUnit").selectOption("day",{force:true});
+    await page.locator("#habitNewTime").fill("07:30");
+    await page.locator("#habitNewStartDateButton").click();
+    await page.locator('#habitNewStartCalendar [data-date="'+start+'"]').click();
+    await page.locator("#habitInput").fill(name);
+    await page.locator("#habitForm [type=submit]").click();
+  }
+  assert.deepEqual(await page.evaluate(()=>state.habits.map(h=>h.startDate)),["2026-11-17","2026-11-18"]);
+  await page.reload();
+  await page.evaluate(()=>document.querySelector("#workspaceHabits").click());
+  assert.equal(await page.locator("#habitEditStartDate").inputValue(),"2026-11-17","start date is editable in Workspace after reload");
+  await page.locator("#habitEditStartDateButton").click();
+  await page.locator('#habitEditStartCalendar [data-date="2026-11-19"]').click();
+  await page.locator("#habitEditForm [type=submit]").click();
+  assert.equal(await page.evaluate(()=>state.habits[0].startDate),"2026-11-19");
+  await page.evaluate(()=>{setHabitViewAll(true);openHabitEditor(state.habits[0].id);});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:path.join(artifacts,"habit-start-date-mobile.png")});
+  assert(await page.evaluate(()=> {
+    const r=document.querySelector("#habitEditStartRow").getBoundingClientRect();
+    return r.left>=0 && r.right<=innerWidth;
+  }),"start-date editor fits mobile");
+  await page.locator("#habitEditCancel").click();
+  assert(!/check-ins/.test(await page.locator("#habitList").innerText()),"all habit types show streaks instead of check-in counts");
   assert.deepEqual(errors, [], "no app errors");
   console.log("PASS: interval habits, weekday filtering, timing edits, precise undo, history, and existing desktop/mobile interactions.");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {
