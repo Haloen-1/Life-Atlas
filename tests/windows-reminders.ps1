@@ -5,11 +5,18 @@ $tokens=$null
 $errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-foreach ($name in @('Read-ReminderConfig','Test-ReminderDay')) {
+foreach ($name in @('Read-ReminderConfig','Test-ReminderDay','Resolve-JournalUrl')) {
     $function=$ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     Invoke-Expression $function.Extent.Text
 }
 Add-Type -Path (Join-Path $root 'windows-toast.cs')
+$localUrl=([uri](Join-Path $root 'index.html')).AbsoluteUri+'#journal'
+$destination=[pscustomobject]@{url=$localUrl;reminder=[pscustomobject]@{openTarget='laptop'}}
+if ((Resolve-JournalUrl $destination) -ne $localUrl) { throw 'Laptop destination changed.' }
+$destination.reminder.openTarget='website'
+if ((Resolve-JournalUrl $destination) -ne 'https://lifeatlas.uk/#journal') { throw 'Website destination failed.' }
+$destination.url='https://example.com/atlas/#journal'
+if ((Resolve-JournalUrl $destination) -ne $destination.url) { throw 'Hosted website URL was not preserved.' }
 $r=[pscustomobject]@{time='20:30';frequency='week';interval=2;days=@(1);start='2026-10-05';end='2026-12-31';enabled=$false;catchUp=$true}
 foreach($case in @(@('2026-10-05',$true),@('2026-10-12',$false),@('2026-10-19',$true),@('2027-01-11',$false))) {
     if ((Test-ReminderDay $r ([datetime]$case[0])) -ne $case[1]) { throw "Wrong recurrence: $($case[0])" }

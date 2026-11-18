@@ -146,7 +146,7 @@ function bindBlockSelection(lane, range) {
 }
 
 function reminderDefaults() {
-  return { enabled: false, inApp: true, catchUp: true, time: "20:30", frequency: "day", interval: 1, days: [new Date().getDay()], start: todayKey(), end: "" };
+  return { enabled: false, inApp: true, catchUp: true, openTarget: location.protocol === "file:" ? "laptop" : "website", time: "20:30", frequency: "day", interval: 1, days: [new Date().getDay()], start: todayKey(), end: "" };
 }
 
 function renderReminderSettings() {
@@ -154,6 +154,7 @@ function renderReminderSettings() {
   journalEl("jrEnabled").checked = r.enabled;
   journalEl("jrInApp").checked = r.inApp !== false;
   journalEl("jrCatchUp").checked = r.catchUp !== false;
+  journalEl("jrOpenTarget").value = r.openTarget;
   for (const [id, value] of [["jrTime",r.time],["jrInterval",r.interval],["jrFrequency",r.frequency],["jrStart",r.start],["jrEnd",r.end]]) journalEl(id).value = value;
   journalEl("jrDays").hidden = r.frequency !== "week";
   journalEl("jrDays").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(r.days.includes(Number(b.dataset.day)))));
@@ -165,6 +166,7 @@ function renderReminderSettings() {
 function readReminderForm() {
   if (!journalEl("journalReminderForm").reportValidity()) return null;
   const r = { enabled: journalEl("jrEnabled").checked, inApp: journalEl("jrInApp").checked, catchUp: journalEl("jrCatchUp").checked,
+    openTarget: journalEl("jrOpenTarget").value,
     time: journalEl("jrTime").value, frequency: journalEl("jrFrequency").value,
     interval: journalEl("jrInterval").valueAsNumber, start: journalEl("jrStart").value, end: journalEl("jrEnd").value,
     days: [...journalEl("jrDays").querySelectorAll('[aria-pressed="true"]')].map(b => Number(b.dataset.day)) };
@@ -288,7 +290,7 @@ function exportJournalReminder() {
 function exportWindowsJournalReminder() {
   const reminder = readReminderForm();
   if (!reminder) return;
-  const url = new URL(location.href);
+  const url = new URL(reminder.openTarget === "website" && location.protocol !== "https:" ? "https://lifeatlas.uk/" : location.href);
   url.hash = "journal";
   url.search = "";
   downloadTextFile("life-atlas-windows-reminder.json", JSON.stringify({

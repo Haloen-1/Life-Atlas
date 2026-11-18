@@ -1,6 +1,7 @@
 Life Atlas Windows journal reminders
 
-1. In Workspace > Permissions, choose your journal reminder time and recurrence.
+1. In Workspace > Permissions, choose the time, recurrence, and whether the
+   Windows reminder opens the Laptop app or Website.
 2. Select Export Windows schedule. This exports only the schedule and app address.
 3. Extract this setup ZIP. Run Install Life Atlas Reminders.cmd and choose the exported JSON.
 4. After changing the schedule in Life Atlas, export it again and rerun setup.

@@ -14,6 +14,7 @@ function Read-ReminderConfig([string]$Path) {
     $c = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     if ($c.app -ne 'Life Atlas' -or $c.version -ne 1 -or !$c.reminder) { throw 'Choose an exported Life Atlas Windows schedule.' }
     $r = $c.reminder
+    if ($r.openTarget -and $r.openTarget -notin @('laptop','website')) { throw 'Choose laptop app or website for the notification destination.' }
     if ($r.time -notmatch '^([01]\d|2[0-3]):[0-5]\d$' -or
         $r.frequency -notin @('day','week','month','year') -or
         $r.interval -lt 1 -or $r.interval -gt 99 -or [int]$r.interval -ne $r.interval) { throw 'Invalid reminder schedule.' }
@@ -29,6 +30,31 @@ function Read-ReminderConfig([string]$Path) {
     if ($url.IsFile -and ([IO.Path]::GetFileName($url.LocalPath) -ne 'index.html' -or $url.IsUnc)) { throw 'Choose the local Life Atlas index.html page.' }
     $c.url = $url.AbsoluteUri
     return $c
+}
+
+function Resolve-JournalUrl($Config) {
+    $uri = [uri]$Config.url
+    if ($Config.reminder.openTarget -eq 'website') {
+        if ($uri.Scheme -eq 'https') { return $uri.AbsoluteUri }
+        return 'https://lifeatlas.uk/#journal'
+    }
+    if ($Config.reminder.openTarget -ne 'laptop') { return $uri.AbsoluteUri }
+    if ($uri.IsFile -and (Test-Path -LiteralPath $uri.LocalPath -PathType Leaf)) { return $uri.AbsoluteUri }
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $links = @(
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Life Atlas.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Life Atlas.lnk')
+        )
+        foreach ($link in $links) {
+            if (!(Test-Path -LiteralPath $link)) { continue }
+            $target = $shell.CreateShortcut($link).TargetPath
+            if (!$target) { continue }
+            $page = Join-Path (Split-Path $target) 'index.html'
+            if (Test-Path -LiteralPath $page -PathType Leaf) { return ([uri]$page).AbsoluteUri + '#journal' }
+        }
+    } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    throw 'Life Atlas laptop app was not found. Export from the local app, or select Website in Workspace > Permissions.'
 }
 
 function Test-ReminderDay($Reminder, [datetime]$Day) {
@@ -101,6 +127,7 @@ try {
             $ConfigPath = $picker.FileName
         }
         $c = Read-ReminderConfig $ConfigPath
+        $c.url = Resolve-JournalUrl $c
         New-Item -ItemType Directory -Path $homeDir -Force | Out-Null
         foreach ($name in @('windows-reminders.ps1','windows-toast.cs','life-atlas.png','life-atlas.ico')) {
             $source = Join-Path $PSScriptRoot $name
@@ -129,11 +156,13 @@ try {
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -MultipleInstances IgnoreNew
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'Life Atlas journal reminder, even when the app is closed.' -Force | Out-Null
         if (!$c.reminder.enabled) { Disable-ScheduledTask -TaskName $taskName | Out-Null }
+        else { Enable-ScheduledTask -TaskName $taskName | Out-Null }
         Write-Output 'Windows reminder installed. Use -Test to send a test; -Remove uninstalls it.'
         exit 0
     }
     $c = Read-ReminderConfig $configFile
     if ($OpenJournal) {
+        $c.url = Resolve-JournalUrl $c
         $browser = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","$env:LocalAppData\Google\Chrome\Application\chrome.exe",
             "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if ($browser) { Start-Process -FilePath $browser -ArgumentList ('--app="'+$c.url+'"') }
